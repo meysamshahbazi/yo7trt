@@ -3,7 +3,6 @@
 __pycache__/*
 .ipynb_checkpoints/*
 *.onnx
-trt/build/*
-test_trt/*
+build/*
 *.ipynb
 
