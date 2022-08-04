@@ -31,11 +31,13 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <array>
 
 using namespace std;
 
 #include <fstream>
 #include <string>
+#include <algorithm>
 
 
 
@@ -66,7 +68,7 @@ struct  TRTDestroy
 
 #define DEVICE 0  // GPU id
 #define NMS_THRESH 0.5
-#define BBOX_CONF_THRESH 0.5
+#define BBOX_CONF_THRESH 0.6
 
 using namespace nvinfer1;
 
@@ -255,42 +257,12 @@ static void generate_yolox_proposals(std::vector<GridAndStride> grid_strides, fl
 
     } // point anchor loop
 }
-/*
-static void generate_yolo7_proposals(float* feat_blob, float prob_threshold, std::vector<Object>& objects)
-{
-    for(int i=0; i < 11520;i++)
-    {
-        float x = feat_blob[i*85+0];
-        float y = feat_blob[i*85+1];
-        float w = feat_blob[i*85+2];
-        float h = feat_blob[i*85+3];
-        float obj_conf = feat_blob[i*85+4];
-        std::vector<float> classes_scores;
-        for(int j = 0;j <80; j++)
-            classes_scores.push_back(feat_blob[i*85+5+j]);
 
-        auto max_score = std::max_element(classes_scores.begin() , classes_scores.end()); 
-        int argmaxVal = distance(classes_scores.begin(), max_score);
-
-
-        float prob = classes_scores[argmaxVal]*obj_conf;
-        if (prob > prob_threshold)
-        {
-            Object obj;
-            obj.prob = prob;
-            obj.label = argmaxVal;
-            obj.rect = cv::Rect_<float>(x,y,w,h);
-            objects.push_back(obj);
-        }
-
-    }
-}*/
 void generete_proposal_scale(float* feat_blob, float prob_threshold, std::vector<Object>& objects,int nx, int ny,float stride,float * anchor_grid_w,float * anchor_grid_h)
 {
     for(int i1=0;i1<3;i1++)
     for(int i2=0;i2<ny;i2++) // nx = 80 stride = 8 
     for(int i3=0;i3<nx;i3++) // ny = 48
-    // for(int i4=0;i4<85;i4++)
     {
         int i4 = 0;
         int this_index = i3*85 + i2*85*nx + i1*85*nx*ny;
@@ -309,18 +281,12 @@ void generete_proposal_scale(float* feat_blob, float prob_threshold, std::vector
         float obj_conf = feat_blob[i4+this_index];
         i4++;
         
-        // cout<<"prob: "<<prob<<endl   ;
         if (obj_conf > prob_threshold)
         {
-            std::vector<float> classes_scores;
-            for(;i4 <85; i4++)
-                classes_scores.push_back(feat_blob[i4+this_index]);
-
-            // cout<<"classes_scores: "s<<classes_scores.size()<<endl   ;
+            std::array<float, NUM_CLASSES> &classes_scores = reinterpret_cast<std::array<float, NUM_CLASSES>&>(feat_blob[i4+this_index]);
 
             auto max_score = std::max_element(classes_scores.begin() , classes_scores.end()); 
             int argmaxVal = distance(classes_scores.begin(), max_score);
-
 
             float prob = classes_scores[argmaxVal]*obj_conf;
 
@@ -330,7 +296,7 @@ void generete_proposal_scale(float* feat_blob, float prob_threshold, std::vector
             float x0 = x - w * 0.5f;
             float y0 = y - h * 0.5f;
             obj.rect = cv::Rect_<float>(x0,y0,w,h);
-            objects.push_back(obj);
+            objects.emplace_back(obj);
         }
     }
 }
@@ -348,17 +314,6 @@ static void generate_yolo7_proposals(float* feat_blob1,float* feat_blob2,float* 
     generete_proposal_scale(feat_blob1,prob_threshold,objects,80,48,8,anchor_grid_w_1,anchor_grid_h_1);
     generete_proposal_scale(feat_blob2,prob_threshold,objects,40,24,16,anchor_grid_w_2,anchor_grid_h_2);
     generete_proposal_scale(feat_blob3,prob_threshold,objects,20,12,32,anchor_grid_w_3,anchor_grid_h_3);
-
-    // cout<<"len objects "<<objects.size()<<endl;
-    // std::ofstream out_file{"../objects.txt"};
-
-    // for (const auto & o:objects)
-    // {
-    //     out_file<<o.rect.x<<","<<o.rect.y<<","<<o.rect.width<<","<<o.rect.height<<","<<o.label<<","<<o.prob<<endl;
-    // }
-
-
-    // out_file.close();
 
 }
 
@@ -569,116 +524,85 @@ static void draw_objects(const cv::Mat& bgr, const std::vector<Object>& objects,
 
     // cv::imwrite("det_res.jpg", image);
     // fprintf(stderr, "save vis file\n");
-    // cv::resize(image,image,cv::Size(2560,1440));
+    cv::resize(image,image,cv::Size(2560,1440));
     cv::imshow("image", image); 
     
-    cv::waitKey(1); 
+    // cv::waitKey(1); 
+
 }
 
 
-void doInference(IExecutionContext& context, float* input, float* output1, const int output_size1, float* output2, const int output_size2, float* output3, const int output_size3, cv::Size input_shape) {
-    const ICudaEngine& engine = context.getEngine();
+// void doInference(IExecutionContext& context, float* input, float* output1, const int output_size1, float* output2, const int output_size2, float* output3, const int output_size3, cv::Size input_shape) {
+//     const ICudaEngine& engine = context.getEngine();
 
-    // Pointers to input and output device buffers to pass to engine.
-    // Engine requires exactly IEngine::getNbBindings() number of buffers.
-    // cout<<"engine.getNbBindings() "<<engine.getNbBindings()<<endl;
-    assert(engine.getNbBindings() == 4); // it must be 4
-    void* buffers[4];
 
-    // In order to bind the buffers, we need to know the names of the input and output tensors.
-    // Note that indices are guaranteed to be less than IEngine::getNbBindings()
-    const int inputIndex = engine.getBindingIndex(INPUT_BLOB_NAME);
+//     assert(engine.getNbBindings() == 4); // it must be 4
+//     void* buffers[4];
 
-    assert(engine.getBindingDataType(inputIndex) == nvinfer1::DataType::kFLOAT);
-    const int outputIndex1 = 1 ;// engine.getBindingIndex(OUTPUT_BLOB_NAME);
-    const int outputIndex2 = 2 ;
-    const int outputIndex3 = 3 ;
-    assert(engine.getBindingDataType(outputIndex1) == nvinfer1::DataType::kFLOAT);
-    int mBatchSize =1;// engine.getMaxBatchSize();
+//     // In order to bind the buffers, we need to know the names of the input and output tensors.
+//     // Note that indices are guaranteed to be less than IEngine::getNbBindings()
+//     const int inputIndex = engine.getBindingIndex(INPUT_BLOB_NAME);
 
-    // Create GPU buffers on device
+//     assert(engine.getBindingDataType(inputIndex) == nvinfer1::DataType::kFLOAT);
+//     const int outputIndex1 = 1;
+//     const int outputIndex2 = 2;
+//     const int outputIndex3 = 3;
+//     assert(engine.getBindingDataType(outputIndex1) == nvinfer1::DataType::kFLOAT);
+//     int mBatchSize =1;// engine.getMaxBatchSize();
+
+//     // Create GPU buffers on device
     
-    CHECK(cudaMalloc(&buffers[inputIndex], 3 * input_shape.height * input_shape.width * sizeof(float)));
-    CHECK(cudaMalloc(&buffers[outputIndex1], output_size1*sizeof(float)));
-    CHECK(cudaMalloc(&buffers[outputIndex2], output_size2*sizeof(float)));
-    CHECK(cudaMalloc(&buffers[outputIndex3], output_size3*sizeof(float)));
+//     CHECK(cudaMalloc(&buffers[inputIndex], 3 * input_shape.height * input_shape.width * sizeof(float)));
+//     CHECK(cudaMalloc(&buffers[outputIndex1], output_size1*sizeof(float)));
+//     CHECK(cudaMalloc(&buffers[outputIndex2], output_size2*sizeof(float)));
+//     CHECK(cudaMalloc(&buffers[outputIndex3], output_size3*sizeof(float)));
 
-    // CHECK(cudaMalloc(&buffers[outputIndex2], output_size2*sizeof(float)));
-    // CHECK(cudaMalloc(&buffers[outputIndex3], output_size3*sizeof(float)));
-    // CHECK(cudaMalloc(&buffers[outputIndex4], output_size4*sizeof(float)));
-    // Create stream
-    cudaStream_t stream;
-    CHECK(cudaStreamCreate(&stream));
+//     // CHECK(cudaMalloc(&buffers[outputIndex2], output_size2*sizeof(float)));
+//     // CHECK(cudaMalloc(&buffers[outputIndex3], output_size3*sizeof(float)));
+//     // CHECK(cudaMalloc(&buffers[outputIndex4], output_size4*sizeof(float)));
+//     // Create stream
+//     cudaStream_t stream;
     
-    // DMA input batch data to device, infer on the batch asynchronously, and DMA output back to host
-    CHECK(cudaMemcpyAsync(buffers[inputIndex], input, 3 * input_shape.height * input_shape.width * sizeof(float), cudaMemcpyHostToDevice, stream));
+//     CHECK(cudaStreamCreate(&stream));
     
-    // int32_t batchSize, void* const* bindings, cudaStream_t stream, cudaEvent_t* inputConsumed)
-    // context.enqueue(1, buffers, stream, nullptr);
-    // void* const* bindings, cudaStream_t stream, cudaEvent_t* inputConsumed)
-    context.enqueueV2(buffers, stream, nullptr);
+//     // DMA input batch data to device, infer on the batch asynchronously, and DMA output back to host
+//     CHECK(cudaMemcpyAsync(buffers[inputIndex], input, 3 * input_shape.height * input_shape.width * sizeof(float), cudaMemcpyHostToDevice, stream));
     
-    CHECK(cudaMemcpyAsync(output1, buffers[outputIndex1], output_size1 * sizeof(float), cudaMemcpyDeviceToHost, stream));
-    CHECK(cudaMemcpyAsync(output2, buffers[outputIndex2], output_size2 * sizeof(float), cudaMemcpyDeviceToHost, stream));
-    CHECK(cudaMemcpyAsync(output3, buffers[outputIndex3], output_size3 * sizeof(float), cudaMemcpyDeviceToHost, stream));
-    // cout<<"IM here\n";
-    cudaStreamSynchronize(stream);
+//     // int32_t batchSize, void* const* bindings, cudaStream_t stream, cudaEvent_t* inputConsumed)
+//     // context.enqueue(1, buffers, stream, nullptr);
+//     // void* const* bindings, cudaStream_t stream, cudaEvent_t* inputConsumed)
+//     context.enqueueV2(buffers, stream, nullptr);
+    
+//     CHECK(cudaMemcpyAsync(output1, buffers[outputIndex1], output_size1 * sizeof(float), cudaMemcpyDeviceToHost, stream));
+//     CHECK(cudaMemcpyAsync(output2, buffers[outputIndex2], output_size2 * sizeof(float), cudaMemcpyDeviceToHost, stream));
+//     CHECK(cudaMemcpyAsync(output3, buffers[outputIndex3], output_size3 * sizeof(float), cudaMemcpyDeviceToHost, stream));
+//     // cout<<"IM here\n";
+//     cudaStreamSynchronize(stream);
 
-    // Release stream and buffers
-    cudaStreamDestroy(stream);
+//     // Release stream and buffers
+//     cudaStreamDestroy(stream);
     
-    CHECK(cudaFree(buffers[inputIndex]));
+//     CHECK(cudaFree(buffers[inputIndex]));
 
-    CHECK(cudaFree(buffers[outputIndex1]));
-    CHECK(cudaFree(buffers[outputIndex2]));
-    CHECK(cudaFree(buffers[outputIndex3]));
+//     CHECK(cudaFree(buffers[outputIndex1]));
+//     CHECK(cudaFree(buffers[outputIndex2]));
+//     CHECK(cudaFree(buffers[outputIndex3]));
     
-}
+// }
 
-/*
-void parseOnnxModel(const string & model_path,
-                    unique_ptr<nvinfer1::ICudaEngine,TRTDestroy> &engine,
-                    unique_ptr<nvinfer1::IExecutionContext,TRTDestroy> &context)
+// calculate size of tensor
+size_t getSizeByDim(const nvinfer1::Dims& dims)
 {
-    Logger logger;
-    // first we create builder 
-    unique_ptr<nvinfer1::IBuilder,TRTDestroy> builder{nvinfer1::createInferBuilder(logger)};
-    // then define flag that is needed for creating network definitiopn 
-    uint32_t flag = 1U <<static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
-    unique_ptr<nvinfer1::INetworkDefinition,TRTDestroy> network{builder->createNetworkV2(flag)};
-    // then parse network 
-    unique_ptr<nvonnxparser::IParser,TRTDestroy> parser{nvonnxparser::createParser(*network,logger)};
-    // parse from file
-    parser->parseFromFile(model_path.c_str(),static_cast<int>(nvinfer1::ILogger::Severity::kINFO));
-    for (int32_t i = 0; i < parser->getNbErrors(); ++i)
+    size_t size = 1;
+    for (size_t i = 0; i < dims.nbDims; ++i)
     {
-        std::cout << parser->getError(i)->desc() << std::endl;
+        size *= dims.d[i];
     }
-    // lets create config file for engine 
-    unique_ptr<nvinfer1::IBuilderConfig,TRTDestroy> config{builder->createBuilderConfig()};
-
-    config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE,1U<<24);
-    // config->setMaxWorkspaceSize(1U<<30);
-
-    // use fp16 if it is possible 
-
-    if (builder->platformHasFastFp16())
-    {
-        config->setFlag(nvinfer1::BuilderFlag::kFP16);
-    }
-    // setm max bach size as it is very importannt for trt
-    // builder->setMaxBatchSize(1);
-    
-    // create engine and excution context
-    // unique_ptr<nvinfer1::IHostMemory,TRTDestroy> serializedModel{builder->buildSerializedNetwork(*network, *config)};
-    engine.reset(builder->buildEngineWithConfig(*network,*config));
-    context.reset(engine->createExecutionContext());
-
-    return;
+    return size;
 }
 
 
-*/
+
 int main(int argc, char** argv) {
     cudaSetDevice(DEVICE);
     // create a model using the API directly and serialize it to a stream
@@ -706,11 +630,6 @@ int main(int argc, char** argv) {
     }
     const std::string input_image_path {argv[3]};
     cv::VideoCapture cap(input_image_path);
-    //std::vector<std::string> file_names;
-    //if (read_files_in_dir(argv[2], file_names) < 0) {
-        //std::cout << "read_files_in_dir failed." << std::endl;
-        //return -1;
-    //}
     
     IRuntime* runtime = createInferRuntime(gLogger);
     assert(runtime != nullptr);
@@ -718,55 +637,52 @@ int main(int argc, char** argv) {
     assert(engine != nullptr); 
     IExecutionContext* context = engine->createExecutionContext();
     assert(context != nullptr);
-    // unique_ptr<nvinfer1::ICudaEngine,TRTDestroy> engine{nullptr};
-    // unique_ptr<nvinfer1::IExecutionContext,TRTDestroy> context{nullptr};
-    // parseOnnxModel(argv[1],engine,context);
-
-
-    ///---------------------------------------------------------------------------
-
+    
     delete[] trtModelStream;
     
-
     auto out_dims1 = engine->getBindingDimensions(1);
-    // cout << engine->getBindingName(1)<<endl;
-    auto output_size1 = 1;
-    for(int j=0;j<out_dims1.nbDims;j++) {
-        // std::cout<<"j "<<j<<"out_dims.d[j] "<<out_dims1.d[j]<<endl;
-        output_size1 *= out_dims1.d[j];
-    }
+    auto output_size1 = getSizeByDim(out_dims1);
 
-    // cout << "output_size: "<<output_size1<<endl;
-    // cout <<"----------------------------\n";
     auto out_dims2 = engine->getBindingDimensions(2);
-    // cout << engine->getBindingName(2)<<endl;
-    auto output_size2 = 1;
-    for(int j=0;j<out_dims2.nbDims;j++) {
-        // std::cout<<"j "<<j<<"out_dims.d[j] "<<out_dims2.d[j]<<endl;
-        output_size2 *= out_dims2.d[j];
-    }
+    auto output_size2 = getSizeByDim(out_dims2);
 
-    // cout << "output_size: "<<output_size2<<endl;
-    // cout <<"----------------------------\n";
     auto out_dims3 = engine->getBindingDimensions(3);
-    // cout << engine->getBindingName(3)<<endl;
-    auto output_size3 = 1;
-    for(int j=0;j<out_dims3.nbDims;j++) {
-        // std::cout<<"j "<<j<<"out_dims.d[j] "<<out_dims3.d[j]<<endl;
-        output_size3 *= out_dims3.d[j];
-    }
-
-    // cout << "output_size: "<<output_size3<<endl;
-    // cout <<"----------------------------\n";
+    auto output_size3 = getSizeByDim(out_dims3);
 
     float* prob1 = new float[output_size1];
     float* prob2 = new float[output_size2];
     float* prob3 = new float[output_size3];
+
     cv::Mat img;
     float* blob;
+
+    // code from doInference()
+    assert(engine->getNbBindings() == 4); // it must be 4
+    void* buffers[4];
+    // In order to bind the buffers, we need to know the names of the input and output tensors.
+    // Note that indices are guaranteed to be less than IEngine::getNbBindings()
+    const int inputIndex = engine->getBindingIndex(INPUT_BLOB_NAME);
+
+    assert(engine->getBindingDataType(inputIndex) == nvinfer1::DataType::kFLOAT);
+    const int outputIndex1 = 1;
+    const int outputIndex2 = 2;
+    const int outputIndex3 = 3;
+    assert(engine->getBindingDataType(outputIndex1) == nvinfer1::DataType::kFLOAT);
+    int mBatchSize =1;// engine.getMaxBatchSize();
+
+    // Create GPU buffers on device
+    
+    CHECK(cudaMalloc(&buffers[inputIndex], 3 * INPUT_W * INPUT_H * sizeof(float)));
+    CHECK(cudaMalloc(&buffers[outputIndex1], output_size1*sizeof(float)));
+    CHECK(cudaMalloc(&buffers[outputIndex2], output_size2*sizeof(float)));
+    CHECK(cudaMalloc(&buffers[outputIndex3], output_size3*sizeof(float)));
+
+    cudaStream_t stream;
+    
+    CHECK(cudaStreamCreate(&stream));
+
     for(;;)
     {
-        // cv::Mat img = cv::imread(input_image_path);
         cap >> img;
 
         // stop the program if no more images
@@ -776,18 +692,25 @@ int main(int argc, char** argv) {
         int img_h = img.rows;
         cv::Mat pr_img = static_resize(img);
         // std::cout << "blob image" << std::endl;
-
+        // cout<<pr_img.size()<<endl;
         // float* blob;
         blob = blobFromImage(pr_img);
         float scale = std::min(INPUT_W / (img.cols*1.0), INPUT_H / (img.rows*1.0));
-        // cout<< pr_img.size()<<endl;
-        // run inference
-        auto start = std::chrono::system_clock::now();
-        doInference(*context, blob, prob1,output_size1, prob2,output_size2, prob3,output_size3, pr_img.size());
-        
 
-        // std::cout << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "ms" << std::endl;
+        auto start = std::chrono::system_clock::now();
+        // doInference(*context, blob, prob1,output_size1, prob2,output_size2, prob3,output_size3, pr_img.size());
+        CHECK(cudaMemcpyAsync(buffers[inputIndex], blob, 3 * INPUT_W * INPUT_H * sizeof(float), cudaMemcpyHostToDevice, stream));
+         // int32_t batchSize, void* const* bindings, cudaStream_t stream, cudaEvent_t* inputConsumed)
+        // context.enqueue(1, buffers, stream, nullptr);
+        // void* const* bindings, cudaStream_t stream, cudaEvent_t* inputConsumed)
+        context->enqueueV2(buffers, stream, nullptr);
         
+        CHECK(cudaMemcpyAsync(prob1, buffers[outputIndex1], output_size1 * sizeof(float), cudaMemcpyDeviceToHost, stream));
+        CHECK(cudaMemcpyAsync(prob2, buffers[outputIndex2], output_size2 * sizeof(float), cudaMemcpyDeviceToHost, stream));
+        CHECK(cudaMemcpyAsync(prob3, buffers[outputIndex3], output_size3 * sizeof(float), cudaMemcpyDeviceToHost, stream));
+        // cout<<"IM here\n";
+        cudaStreamSynchronize(stream);
+         
         std::vector<Object> objects;
         decode_outputs(prob1,prob2,prob3, objects, scale, img_w, img_h);
         auto end = std::chrono::system_clock::now();
@@ -795,16 +718,24 @@ int main(int argc, char** argv) {
         std::cout<<1e6/micro<<" FPS"<<std::endl;
         draw_objects(img, objects, input_image_path);
         
-        // break;
+        int key = cv::waitKey(1); 
+            if(key == 'q') break;
     }
+
+    cudaStreamDestroy(stream);
+    
+    CHECK(cudaFree(buffers[inputIndex]));
+
+    CHECK(cudaFree(buffers[outputIndex1]));
+    CHECK(cudaFree(buffers[outputIndex2]));
+    CHECK(cudaFree(buffers[outputIndex3]));
+
+
     // delete the pointer to the float
     delete blob;
     // destroy the engine
     delete context;
     delete engine;
     delete runtime;
-    //     context->destroy();
-    // engine->destroy();
-    // runtime->destroy();
     return 0;
 }
