@@ -180,11 +180,11 @@ static void nms_sorted_bboxes(const std::vector<Object>& faceobjects, std::vecto
 
     const int n = faceobjects.size();
 
-    std::vector<float> areas(n);
-    for (int i = 0; i < n; i++)
-    {
-        areas[i] = faceobjects[i].rect.area();
-    }
+    // std::vector<float> areas(n);
+    // for (int i = 0; i < n; i++)
+    // {
+    //     areas[i] = faceobjects[i].rect.area();
+    // }
 
     for (int i = 0; i < n; i++)
     {
@@ -197,66 +197,66 @@ static void nms_sorted_bboxes(const std::vector<Object>& faceobjects, std::vecto
 
             // intersection over union
             float inter_area = intersection_area(a, b);
-            float union_area = areas[i] + areas[picked[j]] - inter_area;
+            // float union_area = areas[i] + areas[picked[j]] - inter_area;
+            float union_area = a.rect.area() + b.rect.area() - inter_area;
             float IoU = inter_area / union_area;
             if(IoU > nms_threshold)
             {
                 keep = 0;
 
             }
-            // if (inter_area / union_area > nms_threshold)
-            //     keep = 0;
+
         }
 
         if (keep)
-            picked.push_back(i);
+            picked.emplace_back(i);
     }
 }
 
 
-static void generate_yolox_proposals(std::vector<GridAndStride> grid_strides, float* feat_blob, float prob_threshold, std::vector<Object>& objects)
-{
+// static void generate_yolox_proposals(std::vector<GridAndStride> grid_strides, float* feat_blob, float prob_threshold, std::vector<Object>& objects)
+// {
 
-    const int num_anchors = grid_strides.size();
-    // cout<<"num_anchors "<<num_anchors<<endl;
-    for (int anchor_idx = 0; anchor_idx < num_anchors; anchor_idx++)
-    {
-        const int grid0 = grid_strides[anchor_idx].grid0;
-        const int grid1 = grid_strides[anchor_idx].grid1;
-        const int stride = grid_strides[anchor_idx].stride;
+//     const int num_anchors = grid_strides.size();
+//     // cout<<"num_anchors "<<num_anchors<<endl;
+//     for (int anchor_idx = 0; anchor_idx < num_anchors; anchor_idx++)
+//     {
+//         const int grid0 = grid_strides[anchor_idx].grid0;
+//         const int grid1 = grid_strides[anchor_idx].grid1;
+//         const int stride = grid_strides[anchor_idx].stride;
 
-        const int basic_pos = anchor_idx * (NUM_CLASSES + 5);
+//         const int basic_pos = anchor_idx * (NUM_CLASSES + 5);
 
-        // yolox/models/yolo_head.py decode logic
-        float x_center = (feat_blob[basic_pos+0] + grid0) * stride;
-        float y_center = (feat_blob[basic_pos+1] + grid1) * stride;
-        float w = exp(feat_blob[basic_pos+2]) * stride;
-        float h = exp(feat_blob[basic_pos+3]) * stride;
-        float x0 = x_center - w * 0.5f;
-        float y0 = y_center - h * 0.5f;
+//         // yolox/models/yolo_head.py decode logic
+//         float x_center = (feat_blob[basic_pos+0] + grid0) * stride;
+//         float y_center = (feat_blob[basic_pos+1] + grid1) * stride;
+//         float w = exp(feat_blob[basic_pos+2]) * stride;
+//         float h = exp(feat_blob[basic_pos+3]) * stride;
+//         float x0 = x_center - w * 0.5f;
+//         float y0 = y_center - h * 0.5f;
 
-        float box_objectness = feat_blob[basic_pos+4];
-        for (int class_idx = 0; class_idx < NUM_CLASSES; class_idx++)
-        {
-            float box_cls_score = feat_blob[basic_pos + 5 + class_idx];
-            float box_prob = box_objectness * box_cls_score;
-            if (box_prob > prob_threshold)
-            {
-                Object obj;
-                obj.rect.x = x0;
-                obj.rect.y = y0;
-                obj.rect.width = w;
-                obj.rect.height = h;
-                obj.label = class_idx;
-                obj.prob = box_prob;
+//         float box_objectness = feat_blob[basic_pos+4];
+//         for (int class_idx = 0; class_idx < NUM_CLASSES; class_idx++)
+//         {
+//             float box_cls_score = feat_blob[basic_pos + 5 + class_idx];
+//             float box_prob = box_objectness * box_cls_score;
+//             if (box_prob > prob_threshold)
+//             {
+//                 Object obj;
+//                 obj.rect.x = x0;
+//                 obj.rect.y = y0;
+//                 obj.rect.width = w;
+//                 obj.rect.height = h;
+//                 obj.label = class_idx;
+//                 obj.prob = box_prob;
 
-                objects.push_back(obj);
-            }
+//                 objects.push_back(obj);
+//             }
 
-        } // class loop
+//         } // class loop
 
-    } // point anchor loop
-}
+//     } // point anchor loop
+// }
 
 void generete_proposal_scale(float* feat_blob, float prob_threshold, std::vector<Object>& objects,int nx, int ny,float stride,float * anchor_grid_w,float * anchor_grid_h)
 {
