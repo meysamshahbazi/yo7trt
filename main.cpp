@@ -308,20 +308,22 @@ void generete_proposal_scale(float* feat_blob, float prob_threshold, std::vector
         i4++;
         float obj_conf = feat_blob[i4+this_index];
         i4++;
-        std::vector<float> classes_scores;
-        for(;i4 <85; i4++)
-            classes_scores.push_back(feat_blob[i4+this_index]);
-
-        // cout<<"classes_scores: "s<<classes_scores.size()<<endl   ;
-
-        auto max_score = std::max_element(classes_scores.begin() , classes_scores.end()); 
-        int argmaxVal = distance(classes_scores.begin(), max_score);
-
-
-        float prob = classes_scores[argmaxVal]*obj_conf;
+        
         // cout<<"prob: "<<prob<<endl   ;
-        if (prob > prob_threshold)
+        if (obj_conf > prob_threshold)
         {
+            std::vector<float> classes_scores;
+            for(;i4 <85; i4++)
+                classes_scores.push_back(feat_blob[i4+this_index]);
+
+            // cout<<"classes_scores: "s<<classes_scores.size()<<endl   ;
+
+            auto max_score = std::max_element(classes_scores.begin() , classes_scores.end()); 
+            int argmaxVal = distance(classes_scores.begin(), max_score);
+
+
+            float prob = classes_scores[argmaxVal]*obj_conf;
+
             Object obj;
             obj.prob = prob;
             obj.label = argmaxVal;
@@ -790,7 +792,7 @@ int main(int argc, char** argv) {
         decode_outputs(prob1,prob2,prob3, objects, scale, img_w, img_h);
         auto end = std::chrono::system_clock::now();
         auto micro= std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-        std::cout<<1000000/micro<<" micro"<<std::endl;
+        std::cout<<1e6/micro<<" FPS"<<std::endl;
         draw_objects(img, objects, input_image_path);
         
         // break;
