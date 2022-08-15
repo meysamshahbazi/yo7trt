@@ -214,49 +214,7 @@ static void nms_sorted_bboxes(const std::vector<Object>& faceobjects, std::vecto
 }
 
 
-// static void generate_yolox_proposals(std::vector<GridAndStride> grid_strides, float* feat_blob, float prob_threshold, std::vector<Object>& objects)
-// {
 
-//     const int num_anchors = grid_strides.size();
-//     // cout<<"num_anchors "<<num_anchors<<endl;
-//     for (int anchor_idx = 0; anchor_idx < num_anchors; anchor_idx++)
-//     {
-//         const int grid0 = grid_strides[anchor_idx].grid0;
-//         const int grid1 = grid_strides[anchor_idx].grid1;
-//         const int stride = grid_strides[anchor_idx].stride;
-
-//         const int basic_pos = anchor_idx * (NUM_CLASSES + 5);
-
-//         // yolox/models/yolo_head.py decode logic
-//         float x_center = (feat_blob[basic_pos+0] + grid0) * stride;
-//         float y_center = (feat_blob[basic_pos+1] + grid1) * stride;
-//         float w = exp(feat_blob[basic_pos+2]) * stride;
-//         float h = exp(feat_blob[basic_pos+3]) * stride;
-//         float x0 = x_center - w * 0.5f;
-//         float y0 = y_center - h * 0.5f;
-
-//         float box_objectness = feat_blob[basic_pos+4];
-//         for (int class_idx = 0; class_idx < NUM_CLASSES; class_idx++)
-//         {
-//             float box_cls_score = feat_blob[basic_pos + 5 + class_idx];
-//             float box_prob = box_objectness * box_cls_score;
-//             if (box_prob > prob_threshold)
-//             {
-//                 Object obj;
-//                 obj.rect.x = x0;
-//                 obj.rect.y = y0;
-//                 obj.rect.width = w;
-//                 obj.rect.height = h;
-//                 obj.label = class_idx;
-//                 obj.prob = box_prob;
-
-//                 objects.push_back(obj);
-//             }
-
-//         } // class loop
-
-//     } // point anchor loop
-// }
 
 void generete_proposal_scale(float* feat_blob, float prob_threshold, std::vector<Object>& objects,int nx, int ny,float stride,float * anchor_grid_w,float * anchor_grid_h)
 {
@@ -318,22 +276,39 @@ static void generate_yolo7_proposals(float* feat_blob1,float* feat_blob2,float* 
 }
 
 float* blobFromImage(cv::Mat& img){
-    cv::cvtColor(img,img,cv::COLOR_BGR2RGB);
+    // cv::cvtColor(img,img,cv::COLOR_BGR2RGB);
     float* blob = new float[img.total()*3];
     int channels = 3;
     int img_h = img.rows;
     int img_w = img.cols;
-    for (size_t c = 0; c < channels; c++) 
+    // for (size_t c = 0; c < channels; c++) 
+    // {
+    //     for (size_t  h = 0; h < img_h; h++) 
+    //     {
+    //         for (size_t w = 0; w < img_w; w++) 
+    //         {
+    //             blob[c * img_w * img_h + h * img_w + w] =
+    //                 (float)img.at<cv::Vec3b>(h, w)[c]/255.0f;
+    //         }
+    //     }
+    // }
+
+    int data_idx = 0;
+
+    for (int i = 0; i < img_h; ++i)
     {
-        for (size_t  h = 0; h < img_h; h++) 
+        uchar* pixel = img.ptr<uchar>(i);  // point to first color in row
+        for (int j = 0; j < img_w; ++j)
         {
-            for (size_t w = 0; w < img_w; w++) 
-            {
-                blob[c * img_w * img_h + h * img_w + w] =
-                    (float)img.at<cv::Vec3b>(h, w)[c]/255.0f;
-            }
+            blob[data_idx] = (*pixel++)/255.f;
+            blob[data_idx+img_h*img_w] = (*pixel++)/255.f;
+            blob[data_idx+2*img_h*img_w] = (*pixel++)/255.f;
+            data_idx++;
         }
     }
+
+
+
     return blob;
 }
 
@@ -522,73 +497,12 @@ static void draw_objects(const cv::Mat& bgr, const std::vector<Object>& objects,
                     cv::FONT_HERSHEY_SIMPLEX, 0.4, txt_color, 1);
     }
 
-    // cv::imwrite("det_res.jpg", image);
-    // fprintf(stderr, "save vis file\n");
+
     cv::resize(image,image,cv::Size(2560,1440));
     cv::imshow("image", image); 
     
-    // cv::waitKey(1); 
-
 }
 
-
-// void doInference(IExecutionContext& context, float* input, float* output1, const int output_size1, float* output2, const int output_size2, float* output3, const int output_size3, cv::Size input_shape) {
-//     const ICudaEngine& engine = context.getEngine();
-
-
-//     assert(engine.getNbBindings() == 4); // it must be 4
-//     void* buffers[4];
-
-//     // In order to bind the buffers, we need to know the names of the input and output tensors.
-//     // Note that indices are guaranteed to be less than IEngine::getNbBindings()
-//     const int inputIndex = engine.getBindingIndex(INPUT_BLOB_NAME);
-
-//     assert(engine.getBindingDataType(inputIndex) == nvinfer1::DataType::kFLOAT);
-//     const int outputIndex1 = 1;
-//     const int outputIndex2 = 2;
-//     const int outputIndex3 = 3;
-//     assert(engine.getBindingDataType(outputIndex1) == nvinfer1::DataType::kFLOAT);
-//     int mBatchSize =1;// engine.getMaxBatchSize();
-
-//     // Create GPU buffers on device
-    
-//     CHECK(cudaMalloc(&buffers[inputIndex], 3 * input_shape.height * input_shape.width * sizeof(float)));
-//     CHECK(cudaMalloc(&buffers[outputIndex1], output_size1*sizeof(float)));
-//     CHECK(cudaMalloc(&buffers[outputIndex2], output_size2*sizeof(float)));
-//     CHECK(cudaMalloc(&buffers[outputIndex3], output_size3*sizeof(float)));
-
-//     // CHECK(cudaMalloc(&buffers[outputIndex2], output_size2*sizeof(float)));
-//     // CHECK(cudaMalloc(&buffers[outputIndex3], output_size3*sizeof(float)));
-//     // CHECK(cudaMalloc(&buffers[outputIndex4], output_size4*sizeof(float)));
-//     // Create stream
-//     cudaStream_t stream;
-    
-//     CHECK(cudaStreamCreate(&stream));
-    
-//     // DMA input batch data to device, infer on the batch asynchronously, and DMA output back to host
-//     CHECK(cudaMemcpyAsync(buffers[inputIndex], input, 3 * input_shape.height * input_shape.width * sizeof(float), cudaMemcpyHostToDevice, stream));
-    
-//     // int32_t batchSize, void* const* bindings, cudaStream_t stream, cudaEvent_t* inputConsumed)
-//     // context.enqueue(1, buffers, stream, nullptr);
-//     // void* const* bindings, cudaStream_t stream, cudaEvent_t* inputConsumed)
-//     context.enqueueV2(buffers, stream, nullptr);
-    
-//     CHECK(cudaMemcpyAsync(output1, buffers[outputIndex1], output_size1 * sizeof(float), cudaMemcpyDeviceToHost, stream));
-//     CHECK(cudaMemcpyAsync(output2, buffers[outputIndex2], output_size2 * sizeof(float), cudaMemcpyDeviceToHost, stream));
-//     CHECK(cudaMemcpyAsync(output3, buffers[outputIndex3], output_size3 * sizeof(float), cudaMemcpyDeviceToHost, stream));
-//     // cout<<"IM here\n";
-//     cudaStreamSynchronize(stream);
-
-//     // Release stream and buffers
-//     cudaStreamDestroy(stream);
-    
-//     CHECK(cudaFree(buffers[inputIndex]));
-
-//     CHECK(cudaFree(buffers[outputIndex1]));
-//     CHECK(cudaFree(buffers[outputIndex2]));
-//     CHECK(cudaFree(buffers[outputIndex3]));
-    
-// }
 
 // calculate size of tensor
 size_t getSizeByDim(const nvinfer1::Dims& dims)
