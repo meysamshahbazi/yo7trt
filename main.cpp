@@ -637,19 +637,22 @@ int main(int argc, char** argv) {
     cv::VideoCapture cap(input_image_path);
     
     // IRuntime* runtime = createInferRuntime(gLogger);
-    // assert(runtime != nullptr);
+    unique_ptr<IRuntime,TRTDestroy> runtime{createInferRuntime(gLogger)};
+    assert(runtime != nullptr);
     // ICudaEngine* engine = runtime->deserializeCudaEngine(trtModelStream, size);
-    // assert(engine != nullptr); 
+    unique_ptr<nvinfer1::ICudaEngine,TRTDestroy> engine{runtime->deserializeCudaEngine(trtModelStream, size)};
+    assert(engine != nullptr); 
+    unique_ptr<nvinfer1::IExecutionContext,TRTDestroy> context{engine->createExecutionContext()};
     // IExecutionContext* context = engine->createExecutionContext();
-    // assert(context != nullptr);
+    assert(context != nullptr);
     
-    // delete[] trtModelStream;
-    unique_ptr<nvinfer1::ICudaEngine,TRTDestroy> engine{nullptr};
-    unique_ptr<nvinfer1::IExecutionContext,TRTDestroy> context{nullptr};
+    delete[] trtModelStream;
+    
+    
 
     // parseOnnxModel(argv[1],1U<<30,engine,context);
-    saveEngineFile(argv[1],"../yolo.engine");
-    return -1;
+    // saveEngineFile(argv[1],"../yolo.engine");
+    // return -1;
     cout<<"------------------------------"<<endl;
     for (size_t i = 0; i < engine->getNbBindings(); ++i)
     {
