@@ -33,5 +33,7 @@ make
 
 - [ ]  Add function for parse and generate onnx model
 
+- [ ] Clean code and modularization!
 
+- [ ] use  `getBindingIndex()` for general coding
 

@@ -129,6 +129,51 @@ static inline float intersection_area(const Object& a, const Object& b)
     return inter.area();
 }
 
+void parseOnnxModel(const string & onnx_path,
+                    size_t pool_size,
+                    unique_ptr<nvinfer1::ICudaEngine,TRTDestroy> &engine,
+                    unique_ptr<nvinfer1::IExecutionContext,TRTDestroy> &context)
+{
+    Logger logger;
+    // first we create builder 
+    unique_ptr<nvinfer1::IBuilder,TRTDestroy> builder{nvinfer1::createInferBuilder(logger)};
+    // then define flag that is needed for creating network definitiopn 
+    uint32_t flag = 1U <<static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
+    unique_ptr<nvinfer1::INetworkDefinition,TRTDestroy> network{builder->createNetworkV2(flag)};
+    // then parse network 
+    unique_ptr<nvonnxparser::IParser,TRTDestroy> parser{nvonnxparser::createParser(*network,logger)};
+    // parse from file
+    parser->parseFromFile(onnx_path.c_str(),static_cast<int>(nvinfer1::ILogger::Severity::kINFO));
+    for (int32_t i = 0; i < parser->getNbErrors(); ++i)
+    {
+        std::cout << parser->getError(i)->desc() << std::endl;
+    }
+    // lets create config file for engine 
+    unique_ptr<nvinfer1::IBuilderConfig,TRTDestroy> config{builder->createBuilderConfig()};
+
+    config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE,pool_size);
+    // config->setMaxWorkspaceSize(1U<<30);
+
+    // use fp16 if it is possible 
+
+    if (builder->platformHasFastFp16())
+    {
+        config->setFlag(nvinfer1::BuilderFlag::kFP16);
+    }
+    // setm max bach size as it is very importannt for trt
+    // builder->setMaxBatchSize(1);
+    // create engine and excution context
+    unique_ptr<nvinfer1::IHostMemory,TRTDestroy> serializedModel{builder->buildSerializedNetwork(*network, *config)};
+
+    nvinfer1::IRuntime* runtime = nvinfer1::createInferRuntime(logger);
+
+
+    engine.reset(runtime->deserializeCudaEngine( serializedModel->data(), serializedModel->size()) );
+    context.reset(engine->createExecutionContext());
+    cout<<"im here-----------------------------"<<endl;
+    return;
+}
+
 static void qsort_descent_inplace(std::vector<Object>& faceobjects, int left, int right)
 {
     int i = left;
@@ -545,15 +590,39 @@ int main(int argc, char** argv) {
     const std::string input_image_path {argv[3]};
     cv::VideoCapture cap(input_image_path);
     
-    IRuntime* runtime = createInferRuntime(gLogger);
-    assert(runtime != nullptr);
-    ICudaEngine* engine = runtime->deserializeCudaEngine(trtModelStream, size);
-    assert(engine != nullptr); 
-    IExecutionContext* context = engine->createExecutionContext();
-    assert(context != nullptr);
+    // IRuntime* runtime = createInferRuntime(gLogger);
+    // assert(runtime != nullptr);
+    // ICudaEngine* engine = runtime->deserializeCudaEngine(trtModelStream, size);
+    // assert(engine != nullptr); 
+    // IExecutionContext* context = engine->createExecutionContext();
+    // assert(context != nullptr);
     
-    delete[] trtModelStream;
+    // delete[] trtModelStream;
+    unique_ptr<nvinfer1::ICudaEngine,TRTDestroy> engine{nullptr};
+    unique_ptr<nvinfer1::IExecutionContext,TRTDestroy> context{nullptr};
+
+    parseOnnxModel(argv[1],1U<<30,engine,context);
     
+    cout<<"------------------------------"<<endl;
+    for (size_t i = 0; i < engine->getNbBindings(); ++i)
+    {
+        auto binding_size = getSizeByDim(engine->getBindingDimensions(i)) * 1 * sizeof(float);
+        // cudaMalloc(&buffers_base_q[i], binding_size);
+        std::cout<<engine->getBindingName(i)<<std::endl;
+        // if (engine->bindingIsInput(i))
+        // {
+            
+        //     input_dims_base_q.emplace_back(engine_base_q->getBindingDimensions(i));
+        // }
+        // else
+        // {
+        //     output_dims_base_q.emplace_back(engine_base_q->getBindingDimensions(i));
+        // }
+    }
+
+
+
+
     auto out_dims1 = engine->getBindingDimensions(1);
     auto output_size1 = getSizeByDim(out_dims1);
 
@@ -575,7 +644,7 @@ int main(int argc, char** argv) {
     void* buffers[4];
     // In order to bind the buffers, we need to know the names of the input and output tensors.
     // Note that indices are guaranteed to be less than IEngine::getNbBindings()
-    const int inputIndex = engine->getBindingIndex(INPUT_BLOB_NAME);
+    const int inputIndex = 0;//= engine->getBindingIndex(INPUT_BLOB_NAME);
 
     assert(engine->getBindingDataType(inputIndex) == nvinfer1::DataType::kFLOAT);
     const int outputIndex1 = 1;
@@ -648,8 +717,8 @@ int main(int argc, char** argv) {
     // delete the pointer to the float
     delete blob;
     // destroy the engine
-    delete context;
-    delete engine;
-    delete runtime;
+    // delete context;
+    // delete engine;
+    // delete runtime;
     return 0;
 }
