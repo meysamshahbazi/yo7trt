@@ -40,6 +40,7 @@ using namespace std;
 #include <algorithm>
 
 
+// #define __GEN__TRT_FROM_ONNX__
 
 
 struct  TRTDestroy
@@ -369,6 +370,7 @@ static void generate_yolo7_proposals(float* feat_blob1,float* feat_blob2,float* 
 float* blobFromImage(cv::Mat& img){
     // cv::cvtColor(img,img,cv::COLOR_BGR2RGB);
     float* blob = new float[img.total()*3];
+    cout<<"img.total() "<<img.total()<<endl;
     int channels = 3;
     int img_h = img.rows;
     int img_w = img.cols;
@@ -635,7 +637,8 @@ int main(int argc, char** argv) {
     }
     const std::string input_image_path {argv[3]};
     cv::VideoCapture cap(input_image_path);
-    
+#ifndef __GEN__TRT_FROM_ONNX__
+
     // IRuntime* runtime = createInferRuntime(gLogger);
     unique_ptr<IRuntime,TRTDestroy> runtime{createInferRuntime(gLogger)};
     assert(runtime != nullptr);
@@ -647,31 +650,19 @@ int main(int argc, char** argv) {
     assert(context != nullptr);
     
     delete[] trtModelStream;
+#endif
     
     
+
+#ifdef __GEN__TRT_FROM_ONNX__
 
     // parseOnnxModel(argv[1],1U<<30,engine,context);
-    // saveEngineFile(argv[1],"../yolo.engine");
-    // return -1;
-    cout<<"------------------------------"<<endl;
-    for (size_t i = 0; i < engine->getNbBindings(); ++i)
-    {
-        auto binding_size = getSizeByDim(engine->getBindingDimensions(i)) * 1 * sizeof(float);
-        // cudaMalloc(&buffers_base_q[i], binding_size);
-        std::cout<<engine->getBindingName(i)<<std::endl;
-        // if (engine->bindingIsInput(i))
-        // {
-            
-        //     input_dims_base_q.emplace_back(engine_base_q->getBindingDimensions(i));
-        // }
-        // else
-        // {
-        //     output_dims_base_q.emplace_back(engine_base_q->getBindingDimensions(i));
-        // }
-    }
+    unique_ptr<nvinfer1::ICudaEngine,TRTDestroy> engine{nullptr};
+    unique_ptr<nvinfer1::IExecutionContext,TRTDestroy> context{nullptr};
+    saveEngineFile(argv[1],"../yolo.engine");
+    return -1;
 
-
-
+#endif
 
     auto out_dims1 = engine->getBindingDimensions(1);
     auto output_size1 = getSizeByDim(out_dims1);
@@ -687,7 +678,6 @@ int main(int argc, char** argv) {
     float* prob3 = new float[output_size3];
 
     cv::Mat img;
-    float* blob;
 
     // code from doInference()
     assert(engine->getNbBindings() == 4); // it must be 4
@@ -704,12 +694,15 @@ int main(int argc, char** argv) {
     int mBatchSize =1;// engine.getMaxBatchSize();
 
     // Create GPU buffers on device
+    float* blob;
+    cudaMallocHost((void **)&blob, 1 * 3 * INPUT_W * INPUT_H*sizeof(float));
     
     CHECK(cudaMalloc(&buffers[inputIndex], 3 * INPUT_W * INPUT_H * sizeof(float)));
     CHECK(cudaMalloc(&buffers[outputIndex1], output_size1*sizeof(float)));
     CHECK(cudaMalloc(&buffers[outputIndex2], output_size2*sizeof(float)));
     CHECK(cudaMalloc(&buffers[outputIndex3], output_size3*sizeof(float)));
 
+    // float* blob = new float[3 * INPUT_W * INPUT_H];
     cudaStream_t stream;
     
     CHECK(cudaStreamCreate(&stream));
@@ -727,7 +720,22 @@ int main(int argc, char** argv) {
         // std::cout << "blob image" << std::endl;
         // cout<<pr_img.size()<<endl;
         // float* blob;
-        blob = blobFromImage(pr_img);
+        // blob = blobFromImage(pr_img);
+        
+        int data_idx = 0;
+
+        for (int i = 0; i < INPUT_H; ++i)
+        {
+            uchar* pixel = pr_img.ptr<uchar>(i);  // point to first color in row
+            for (int j = 0; j < INPUT_W; ++j)
+            {
+                blob[data_idx] = (*pixel++)/255.f;
+                blob[data_idx+INPUT_H*INPUT_W] = (*pixel++)/255.f;
+                blob[data_idx+2*INPUT_H*INPUT_W] = (*pixel++)/255.f;
+                data_idx++;
+            }
+        }
+
         float scale = std::min(INPUT_W / (img.cols*1.0), INPUT_H / (img.rows*1.0));
 
         auto start = std::chrono::system_clock::now();
@@ -763,9 +771,10 @@ int main(int argc, char** argv) {
     CHECK(cudaFree(buffers[outputIndex2]));
     CHECK(cudaFree(buffers[outputIndex3]));
 
+    cudaFreeHost(blob);
 
     // delete the pointer to the float
-    delete blob;
+    // delete blob;
     // destroy the engine
     // delete context;
     // delete engine;
