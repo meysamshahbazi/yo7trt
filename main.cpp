@@ -81,7 +81,8 @@ const char* INPUT_BLOB_NAME = "input_0";
 const char* OUTPUT_BLOB_NAME = "o0";
 static Logger gLogger;
 
-cv::Mat static_resize(cv::Mat& img) {
+cv::Mat static_resize(cv::Mat& img) 
+{
     float r = std::min(INPUT_W / (img.cols*1.0), INPUT_H / (img.rows*1.0));
     // r = std::min(r, 1.0f);
     int unpad_w = r * img.cols;
@@ -368,24 +369,12 @@ static void generate_yolo7_proposals(float* feat_blob1,float* feat_blob2,float* 
 }
 
 float* blobFromImage(cv::Mat& img){
+    // this function can not be used for pin memmory functionallity 
     // cv::cvtColor(img,img,cv::COLOR_BGR2RGB);
     float* blob = new float[img.total()*3];
-    cout<<"img.total() "<<img.total()<<endl;
     int channels = 3;
     int img_h = img.rows;
     int img_w = img.cols;
-    // for (size_t c = 0; c < channels; c++) 
-    // {
-    //     for (size_t  h = 0; h < img_h; h++) 
-    //     {
-    //         for (size_t w = 0; w < img_w; w++) 
-    //         {
-    //             blob[c * img_w * img_h + h * img_w + w] =
-    //                 (float)img.at<cv::Vec3b>(h, w)[c]/255.0f;
-    //         }
-    //     }
-    // }
-
     int data_idx = 0;
 
     for (int i = 0; i < img_h; ++i)
@@ -399,8 +388,6 @@ float* blobFromImage(cv::Mat& img){
             data_idx++;
         }
     }
-
-
 
     return blob;
 }
@@ -699,7 +686,7 @@ int main(int argc, char** argv) {
     int mBatchSize =1;// engine.getMaxBatchSize();
 
     // Create GPU buffers on device
-    float* blob;
+    float* blob;// = new float[3 * INPUT_W * INPUT_H];
     cudaMallocHost((void **)&blob, 1 * 3 * INPUT_W * INPUT_H*sizeof(float));
     
     CHECK(cudaMalloc(&buffers[inputIndex], 3 * INPUT_W * INPUT_H * sizeof(float)));
@@ -714,6 +701,8 @@ int main(int argc, char** argv) {
 
     for(;;)
     {
+        
+
         cap >> img;
 
         // stop the program if no more images
@@ -721,7 +710,12 @@ int main(int argc, char** argv) {
             break;
         int img_w = img.cols;
         int img_h = img.rows;
+
         cv::Mat pr_img = static_resize(img);
+
+        auto start = std::chrono::system_clock::now();
+
+
         // std::cout << "blob image" << std::endl;
         // cout<<pr_img.size()<<endl;
         // float* blob;
@@ -740,10 +734,11 @@ int main(int argc, char** argv) {
                 data_idx++;
             }
         }
+        
 
         float scale = std::min(INPUT_W / (img.cols*1.0), INPUT_H / (img.rows*1.0));
 
-        auto start = std::chrono::system_clock::now();
+        
         // doInference(*context, blob, prob1,output_size1, prob2,output_size2, prob3,output_size3, pr_img.size());
         CHECK(cudaMemcpyAsync(buffers[inputIndex], blob, 3 * INPUT_W * INPUT_H * sizeof(float), cudaMemcpyHostToDevice, stream));
          // int32_t batchSize, void* const* bindings, cudaStream_t stream, cudaEvent_t* inputConsumed)
@@ -761,6 +756,7 @@ int main(int argc, char** argv) {
         decode_outputs(prob1,prob2,prob3, objects, scale, img_w, img_h);
         auto end = std::chrono::system_clock::now();
         auto micro= std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+        // std::cout<<"duration: "<< micro << std::endl;
         std::cout<<1e6/micro<<" FPS"<<std::endl;
         draw_objects(img, objects, input_image_path);
         
@@ -777,7 +773,7 @@ int main(int argc, char** argv) {
     CHECK(cudaFree(buffers[outputIndex3]));
 
     cudaFreeHost(blob);
-    
+
     cudaFreeHost(prob1);
     cudaFreeHost(prob2);
     cudaFreeHost(prob3);
