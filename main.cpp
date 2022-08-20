@@ -673,9 +673,14 @@ int main(int argc, char** argv) {
     auto out_dims3 = engine->getBindingDimensions(3);
     auto output_size3 = getSizeByDim(out_dims3);
 
-    float* prob1 = new float[output_size1];
-    float* prob2 = new float[output_size2];
-    float* prob3 = new float[output_size3];
+    float* prob1;// = new float[output_size1];
+    float* prob2;// = new float[output_size2];
+    float* prob3;// = new float[output_size3];
+
+
+    cudaMallocHost((void **)&prob1, output_size1*sizeof(float));
+    cudaMallocHost((void **)&prob2, output_size2*sizeof(float));
+    cudaMallocHost((void **)&prob3, output_size3*sizeof(float));
 
     cv::Mat img;
 
@@ -749,7 +754,7 @@ int main(int argc, char** argv) {
         CHECK(cudaMemcpyAsync(prob1, buffers[outputIndex1], output_size1 * sizeof(float), cudaMemcpyDeviceToHost, stream));
         CHECK(cudaMemcpyAsync(prob2, buffers[outputIndex2], output_size2 * sizeof(float), cudaMemcpyDeviceToHost, stream));
         CHECK(cudaMemcpyAsync(prob3, buffers[outputIndex3], output_size3 * sizeof(float), cudaMemcpyDeviceToHost, stream));
-        // cout<<"IM here\n";
+        
         cudaStreamSynchronize(stream);
          
         std::vector<Object> objects;
@@ -772,6 +777,10 @@ int main(int argc, char** argv) {
     CHECK(cudaFree(buffers[outputIndex3]));
 
     cudaFreeHost(blob);
+    
+    cudaFreeHost(prob1);
+    cudaFreeHost(prob2);
+    cudaFreeHost(prob3);
 
     // delete the pointer to the float
     // delete blob;
