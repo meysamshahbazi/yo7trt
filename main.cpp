@@ -583,7 +583,6 @@ static void draw_objects(const cv::Mat& bgr, const std::vector<Object>& objects,
     
 }
 
-
 // calculate size of tensor
 size_t getSizeByDim(const nvinfer1::Dims& dims)
 {
@@ -701,28 +700,19 @@ int main(int argc, char** argv) {
 
     for(;;)
     {
-        
-
         cap >> img;
 
         // stop the program if no more images
         if(img.rows==0 || img.cols==0)
             break;
+
         int img_w = img.cols;
         int img_h = img.rows;
-
-        cv::Mat pr_img = static_resize(img);
-
+        
         auto start = std::chrono::system_clock::now();
-
-
-        // std::cout << "blob image" << std::endl;
-        // cout<<pr_img.size()<<endl;
-        // float* blob;
-        // blob = blobFromImage(pr_img);
+        cv::Mat pr_img = static_resize(img);
         
         int data_idx = 0;
-
         for (int i = 0; i < INPUT_H; ++i)
         {
             uchar* pixel = pr_img.ptr<uchar>(i);  // point to first color in row
@@ -735,13 +725,13 @@ int main(int argc, char** argv) {
             }
         }
         
-
         float scale = std::min(INPUT_W / (img.cols*1.0), INPUT_H / (img.rows*1.0));
 
         
         // doInference(*context, blob, prob1,output_size1, prob2,output_size2, prob3,output_size3, pr_img.size());
         CHECK(cudaMemcpyAsync(buffers[inputIndex], blob, 3 * INPUT_W * INPUT_H * sizeof(float), cudaMemcpyHostToDevice, stream));
-         // int32_t batchSize, void* const* bindings, cudaStream_t stream, cudaEvent_t* inputConsumed)
+
+        // int32_t batchSize, void* const* bindings, cudaStream_t stream, cudaEvent_t* inputConsumed)
         // context.enqueue(1, buffers, stream, nullptr);
         // void* const* bindings, cudaStream_t stream, cudaEvent_t* inputConsumed)
         context->enqueueV2(buffers, stream, nullptr);
@@ -751,13 +741,14 @@ int main(int argc, char** argv) {
         CHECK(cudaMemcpyAsync(prob3, buffers[outputIndex3], output_size3 * sizeof(float), cudaMemcpyDeviceToHost, stream));
         
         cudaStreamSynchronize(stream);
-         
-        std::vector<Object> objects;
-        decode_outputs(prob1,prob2,prob3, objects, scale, img_w, img_h);
+
         auto end = std::chrono::system_clock::now();
         auto micro= std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-        // std::cout<<"duration: "<< micro << std::endl;
         std::cout<<1e6/micro<<" FPS"<<std::endl;
+
+        std::vector<Object> objects;
+        decode_outputs(prob1,prob2,prob3, objects, scale, img_w, img_h);
+        
         draw_objects(img, objects, input_image_path);
         
         int key = cv::waitKey(1); 
