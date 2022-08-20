@@ -174,6 +174,52 @@ void parseOnnxModel(const string & onnx_path,
     return;
 }
 
+void saveEngineFile(const string & onnx_path,
+                    const string & engine_path)
+{
+    Logger logger;
+    // first we create builder 
+    unique_ptr<nvinfer1::IBuilder,TRTDestroy> builder{nvinfer1::createInferBuilder(logger)};
+    // then define flag that is needed for creating network definitiopn 
+    uint32_t flag = 1U <<static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
+    unique_ptr<nvinfer1::INetworkDefinition,TRTDestroy> network{builder->createNetworkV2(flag)};
+    // then parse network 
+    unique_ptr<nvonnxparser::IParser,TRTDestroy> parser{nvonnxparser::createParser(*network,logger)};
+    // parse from file
+    parser->parseFromFile(onnx_path.c_str(),static_cast<int>(nvinfer1::ILogger::Severity::kINFO));
+    for (int32_t i = 0; i < parser->getNbErrors(); ++i)
+    {
+        std::cout << parser->getError(i)->desc() << std::endl;
+    }
+    // lets create config file for engine 
+    unique_ptr<nvinfer1::IBuilderConfig,TRTDestroy> config{builder->createBuilderConfig()};
+
+    config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE,1U<<24);
+    // config->setMaxWorkspaceSize(1U<<30);
+
+    // use fp16 if it is possible 
+
+    if (builder->platformHasFastFp16())
+    {
+        config->setFlag(nvinfer1::BuilderFlag::kFP16);
+    }
+    // setm max bach size as it is very importannt for trt
+    // builder->setMaxBatchSize(1);
+    // create engine and excution context
+    unique_ptr<nvinfer1::IHostMemory,TRTDestroy> serializedModel{builder->buildSerializedNetwork(*network, *config)};
+
+    std::ofstream p(engine_path, std::ios::binary);
+    if (!p)
+    {
+        std::cerr << "could not open plan output file" << std::endl;
+        return;
+    }
+
+    p.write(reinterpret_cast<const char*>(serializedModel->data()), serializedModel->size());
+    return;
+}
+
+
 static void qsort_descent_inplace(std::vector<Object>& faceobjects, int left, int right)
 {
     int i = left;
@@ -601,8 +647,9 @@ int main(int argc, char** argv) {
     unique_ptr<nvinfer1::ICudaEngine,TRTDestroy> engine{nullptr};
     unique_ptr<nvinfer1::IExecutionContext,TRTDestroy> context{nullptr};
 
-    parseOnnxModel(argv[1],1U<<30,engine,context);
-    
+    // parseOnnxModel(argv[1],1U<<30,engine,context);
+    saveEngineFile(argv[1],"../yolo.engine");
+    return -1;
     cout<<"------------------------------"<<endl;
     for (size_t i = 0; i < engine->getNbBindings(); ++i)
     {

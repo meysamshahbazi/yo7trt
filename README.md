@@ -29,9 +29,9 @@ make
 
 - [x]  Add sctript for generating trt model 
 
-- [ ]  Add section for generating onnx model in python
+- [x]  Add section for generating onnx model in python
 
-- [ ]  Add function for parse and generate onnx model
+- [x]  Add function for parse and generate onnx model
 
 - [ ] Clean code and modularization!
 
