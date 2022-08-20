@@ -25,9 +25,13 @@ make
 
 ## ToDo:
 
-- [ ] add how to section
+- [x]  Add how to section
 
-- [ ]  add sctript for generating trt model 
+- [x]  Add sctript for generating trt model 
+
+- [ ]  Add section for generating onnx model in python
+
+- [ ]  Add function for parse and generate onnx model
 
 
 
