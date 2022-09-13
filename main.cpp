@@ -40,7 +40,8 @@ using namespace std;
 #include <algorithm>
 
 
-// #define __GEN__TRT_FROM_ONNX__
+#define CLASSIC_MEM
+// #define UNIFIED_MEM
 
 
 struct  TRTDestroy
@@ -68,8 +69,8 @@ struct  TRTDestroy
     } while (0)
 
 #define DEVICE 0  // GPU id
-#define NMS_THRESH 0.5
-#define BBOX_CONF_THRESH 0.6
+#define NMS_THRESH 0.45
+#define BBOX_CONF_THRESH 0.5
 
 using namespace nvinfer1;
 
@@ -81,15 +82,18 @@ const char* INPUT_BLOB_NAME = "input_0";
 const char* OUTPUT_BLOB_NAME = "o0";
 static Logger gLogger;
 
-cv::Mat static_resize(cv::Mat& img) 
+// cv::Mat static_resize(cv::Mat& img) 
+cv::Mat static_resize(cv::Mat& img,cv::Mat& out) 
 {
     float r = std::min(INPUT_W / (img.cols*1.0), INPUT_H / (img.rows*1.0));
     // r = std::min(r, 1.0f);
+    std::cout<<r<<std::endl;
     int unpad_w = r * img.cols;
     int unpad_h = r * img.rows;
     cv::Mat re(unpad_h, unpad_w, CV_8UC3);
     cv::resize(img, re, re.size());
-    cv::Mat out(INPUT_H, INPUT_W, CV_8UC3, cv::Scalar(114, 114, 114));
+    // cv::Mat out(INPUT_H, INPUT_W, CV_8UC3, cv::Scalar(114, 114, 114));
+    out = cv::Mat(INPUT_H, INPUT_W, CV_8UC3, cv::Scalar(114, 114, 114));
     re.copyTo(out(cv::Rect(0, 0, re.cols, re.rows)));
     
     return out;
@@ -153,8 +157,8 @@ void parseOnnxModel(const string & onnx_path,
     // lets create config file for engine 
     unique_ptr<nvinfer1::IBuilderConfig,TRTDestroy> config{builder->createBuilderConfig()};
 
-    config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE,pool_size);
-    // config->setMaxWorkspaceSize(1U<<30);
+    // config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE,pool_size);
+    config->setMaxWorkspaceSize(1U<<30);
 
     // use fp16 if it is possible 
 
@@ -196,8 +200,8 @@ void saveEngineFile(const string & onnx_path,
     // lets create config file for engine 
     unique_ptr<nvinfer1::IBuilderConfig,TRTDestroy> config{builder->createBuilderConfig()};
 
-    config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE,1U<<24);
-    // config->setMaxWorkspaceSize(1U<<30);
+    // config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE,1U<<24);
+    config->setMaxWorkspaceSize(1U<<26);
 
     // use fp16 if it is possible 
 
@@ -368,15 +372,11 @@ static void generate_yolo7_proposals(float* feat_blob1,float* feat_blob2,float* 
 
 }
 
-float* blobFromImage(cv::Mat& img){
-    // this function can not be used for pin memmory functionallity 
-    // cv::cvtColor(img,img,cv::COLOR_BGR2RGB);
-    float* blob = new float[img.total()*3];
-    int channels = 3;
+// float* blobFromImage(cv::Mat& img){
+void blobFromImage(cv::Mat& img,float* blob){
     int img_h = img.rows;
     int img_w = img.cols;
     int data_idx = 0;
-
     for (int i = 0; i < img_h; ++i)
     {
         uchar* pixel = img.ptr<uchar>(i);  // point to first color in row
@@ -388,10 +388,25 @@ float* blobFromImage(cv::Mat& img){
             data_idx++;
         }
     }
-
-    return blob;
 }
 
+void blobFromImage2(cv::Mat& img,float* blob){
+    int img_h = img.rows;
+    int img_w = img.cols;
+    int data_idx = 0;
+    for (int i = 0; i < img_h; ++i)
+    {
+        uchar* pixel = img.ptr<uchar>(i);  // point to first color in row
+        for (int j = 0; j < img_w; ++j)
+        {
+            data_idx = i*img_w+j;
+            blob[data_idx] = (*pixel++)/255.f;
+            blob[data_idx+INPUT_H*INPUT_W] = (*pixel++)/255.f;
+            blob[data_idx+2*INPUT_H*INPUT_W] = (*pixel++)/255.f;
+            // data_idx++;
+        }
+    }
+}
 
 static void decode_outputs(float* prob1,float* prob2,float* prob3, std::vector<Object>& objects, float scale, const int img_w, const int img_h) {
         std::vector<Object> proposals;
@@ -578,10 +593,11 @@ static void draw_objects(const cv::Mat& bgr, const std::vector<Object>& objects,
     }
 
 
-    cv::resize(image,image,cv::Size(2560,1440));
+    cv::resize(image,image,cv::Size(960,540));
     cv::imshow("image", image); 
     
 }
+
 
 // calculate size of tensor
 size_t getSizeByDim(const nvinfer1::Dims& dims)
@@ -601,6 +617,9 @@ int main(int argc, char** argv) {
     // create a model using the API directly and serialize it to a stream
     char *trtModelStream{nullptr};
     size_t size{0};
+
+    // saveEngineFile(argv[1],"../yolo-tiny.engine");
+    // return -1;
 
     if (argc == 4 && std::string(argv[2]) == "-i") {
         const std::string engine_file_path {argv[1]};
@@ -623,8 +642,7 @@ int main(int argc, char** argv) {
     }
     const std::string input_image_path {argv[3]};
     cv::VideoCapture cap(input_image_path);
-#ifndef __GEN__TRT_FROM_ONNX__
-
+    
     // IRuntime* runtime = createInferRuntime(gLogger);
     unique_ptr<IRuntime,TRTDestroy> runtime{createInferRuntime(gLogger)};
     assert(runtime != nullptr);
@@ -636,39 +654,34 @@ int main(int argc, char** argv) {
     assert(context != nullptr);
     
     delete[] trtModelStream;
-#endif
     
     
-
-#ifdef __GEN__TRT_FROM_ONNX__
 
     // parseOnnxModel(argv[1],1U<<30,engine,context);
-    unique_ptr<nvinfer1::ICudaEngine,TRTDestroy> engine{nullptr};
-    unique_ptr<nvinfer1::IExecutionContext,TRTDestroy> context{nullptr};
-    saveEngineFile(argv[1],"../yolo.engine");
-    return -1;
+    // unique_ptr<nvinfer1::ICudaEngine,TRTDestroy> engine{nullptr};
+    // unique_ptr<nvinfer1::IExecutionContext,TRTDestroy> context{nullptr};
+    
+    cout<<"------------------------------"<<endl;
+    for (size_t i = 0; i < engine->getNbBindings(); ++i)
+    {
+        auto binding_size = getSizeByDim(engine->getBindingDimensions(i)) * 1 * sizeof(float);
+        // cudaMalloc(&buffers_base_q[i], binding_size);
+        std::cout<<engine->getBindingName(i)<<std::endl;
+        // if (engine->bindingIsInput(i))
+        // {
+            
+        //     input_dims_base_q.emplace_back(engine_base_q->getBindingDimensions(i));
+        // }
+        // else
+        // {
+        //     output_dims_base_q.emplace_back(engine_base_q->getBindingDimensions(i));
+        // }
+    }
 
-#endif
-
-    auto out_dims1 = engine->getBindingDimensions(1);
-    auto output_size1 = getSizeByDim(out_dims1);
-
-    auto out_dims2 = engine->getBindingDimensions(2);
-    auto output_size2 = getSizeByDim(out_dims2);
-
-    auto out_dims3 = engine->getBindingDimensions(3);
-    auto output_size3 = getSizeByDim(out_dims3);
-
-    float* prob1;// = new float[output_size1];
-    float* prob2;// = new float[output_size2];
-    float* prob3;// = new float[output_size3];
-
-
-    cudaMallocHost((void **)&prob1, output_size1*sizeof(float));
-    cudaMallocHost((void **)&prob2, output_size2*sizeof(float));
-    cudaMallocHost((void **)&prob3, output_size3*sizeof(float));
 
     cv::Mat img;
+
+    
 
     // code from doInference()
     assert(engine->getNbBindings() == 4); // it must be 4
@@ -685,18 +698,74 @@ int main(int argc, char** argv) {
     int mBatchSize =1;// engine.getMaxBatchSize();
 
     // Create GPU buffers on device
-    float* blob;// = new float[3 * INPUT_W * INPUT_H];
-    cudaMallocHost((void **)&blob, 1 * 3 * INPUT_W * INPUT_H*sizeof(float));
-    
+
+auto out_dims1 = engine->getBindingDimensions(1);
+auto out_dims2 = engine->getBindingDimensions(2);
+auto out_dims3 = engine->getBindingDimensions(3);
+
+auto output_size1 = getSizeByDim(out_dims1);
+auto output_size2 = getSizeByDim(out_dims2);
+auto output_size3 = getSizeByDim(out_dims3);
+
+#ifdef CLASSIC_MEM
+    float* prob1 = new float[output_size1];
+    float* prob2 = new float[output_size2];
+    float* prob3 = new float[output_size3];
+
+    float blob[INPUT_H*INPUT_W*3];
+
     CHECK(cudaMalloc(&buffers[inputIndex], 3 * INPUT_W * INPUT_H * sizeof(float)));
     CHECK(cudaMalloc(&buffers[outputIndex1], output_size1*sizeof(float)));
     CHECK(cudaMalloc(&buffers[outputIndex2], output_size2*sizeof(float)));
     CHECK(cudaMalloc(&buffers[outputIndex3], output_size3*sizeof(float)));
+#endif
+#ifdef UNIFIED_MEM
+    float *blob;
+    float *prob1,*prob2,*prob3;
+    cudaMallocManaged((void **)&blob,3 * INPUT_W * INPUT_H * sizeof(float),cudaMemAttachHost);
+    cudaMallocManaged((void **)&prob1,output_size1*sizeof(float));
+    cudaMallocManaged((void **)&prob2,output_size2*sizeof(float));
+    cudaMallocManaged((void **)&prob3,output_size3*sizeof(float));
 
-    // float* blob = new float[3 * INPUT_W * INPUT_H];
+    buffers[inputIndex] = (void *) blob;
+    buffers[outputIndex1] = (void *) prob1;
+    buffers[outputIndex2] = (void *) prob2;
+    buffers[outputIndex3] = (void *) prob3;
+#endif
     cudaStream_t stream;
     
     CHECK(cudaStreamCreate(&stream));
+    // cv::Mat pr_img;
+
+    cap >> img;
+
+        // stop the program if no more images
+    if(img.rows==0 || img.cols==0)
+        return -1;
+    int img_w = img.cols;
+    int img_h = img.rows;
+
+    float r = std::min(INPUT_W / (img.cols*1.0), INPUT_H / (img.rows*1.0));
+    
+    std::cout<<r<<std::endl;
+    int unpad_w = r * img_w;
+    int unpad_h = r * img_h;
+    cv::Mat re(unpad_h, unpad_w, CV_8UC3);
+    // cv::Mat pr_img(INPUT_H, INPUT_W, CV_8UC3, cv::Scalar(114, 114, 114));
+
+    int data_idx = 0;
+    for (int i = 0; i < INPUT_H; ++i)
+    {
+        // uchar* pixel = img.ptr<uchar>(i);  // point to first color in row
+        for (int j = 0; j < INPUT_W; ++j)
+        {
+            blob[data_idx] = 114.0f/255.f;
+            blob[data_idx+INPUT_H*INPUT_W] = 114.0f/255.f;
+            blob[data_idx+2*INPUT_H*INPUT_W] = 114.0f/255.f;
+            data_idx++;
+        }
+    }
+
 
     for(;;)
     {
@@ -705,54 +774,59 @@ int main(int argc, char** argv) {
         // stop the program if no more images
         if(img.rows==0 || img.cols==0)
             break;
-
         int img_w = img.cols;
         int img_h = img.rows;
+        // pr_img = static_resize(img);
+        // static_resize(img,pr_img);
+        // START of static_resize function -----------------------
         
-        auto start = std::chrono::system_clock::now();
-        cv::Mat pr_img = static_resize(img);
-        
-        int data_idx = 0;
-        for (int i = 0; i < INPUT_H; ++i)
-        {
-            uchar* pixel = pr_img.ptr<uchar>(i);  // point to first color in row
-            for (int j = 0; j < INPUT_W; ++j)
-            {
-                blob[data_idx] = (*pixel++)/255.f;
-                blob[data_idx+INPUT_H*INPUT_W] = (*pixel++)/255.f;
-                blob[data_idx+2*INPUT_H*INPUT_W] = (*pixel++)/255.f;
-                data_idx++;
-            }
-        }
-        
+        cv::resize(img, re, re.size());
+        blobFromImage2(re,blob);
         float scale = std::min(INPUT_W / (img.cols*1.0), INPUT_H / (img.rows*1.0));
 
-        
+        auto start = std::chrono::system_clock::now();
         // doInference(*context, blob, prob1,output_size1, prob2,output_size2, prob3,output_size3, pr_img.size());
+#ifdef CLASSIC_MEM
         CHECK(cudaMemcpyAsync(buffers[inputIndex], blob, 3 * INPUT_W * INPUT_H * sizeof(float), cudaMemcpyHostToDevice, stream));
+#endif
 
-        // int32_t batchSize, void* const* bindings, cudaStream_t stream, cudaEvent_t* inputConsumed)
+#ifdef UNIFIED_MEM
+        cudaStreamAttachMemAsync(stream,blob,0,cudaMemAttachGlobal);
+#endif
+         // int32_t batchSize, void* const* bindings, cudaStream_t stream, cudaEvent_t* inputConsumed)
         // context.enqueue(1, buffers, stream, nullptr);
         // void* const* bindings, cudaStream_t stream, cudaEvent_t* inputConsumed)
         context->enqueueV2(buffers, stream, nullptr);
-        
+#ifdef CLASSIC_MEM        
         CHECK(cudaMemcpyAsync(prob1, buffers[outputIndex1], output_size1 * sizeof(float), cudaMemcpyDeviceToHost, stream));
         CHECK(cudaMemcpyAsync(prob2, buffers[outputIndex2], output_size2 * sizeof(float), cudaMemcpyDeviceToHost, stream));
         CHECK(cudaMemcpyAsync(prob3, buffers[outputIndex3], output_size3 * sizeof(float), cudaMemcpyDeviceToHost, stream));
-        
+#endif        
+        // cout<<"IM here\n";
+#ifdef UNIFIED_MEM
+        cudaStreamAttachMemAsync(stream,prob1,0,cudaMemAttachHost);
+        cudaStreamAttachMemAsync(stream,prob2,0,cudaMemAttachHost);
+        cudaStreamAttachMemAsync(stream,prob3,0,cudaMemAttachHost);
+#endif
         cudaStreamSynchronize(stream);
-
+         
+        std::vector<Object> objects;
+        decode_outputs(prob1,prob2,prob3, objects, scale, img_w, img_h);
         auto end = std::chrono::system_clock::now();
         auto micro= std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
         std::cout<<1e6/micro<<" FPS"<<std::endl;
-
-        std::vector<Object> objects;
-        decode_outputs(prob1,prob2,prob3, objects, scale, img_w, img_h);
-        
         draw_objects(img, objects, input_image_path);
         
         int key = cv::waitKey(1); 
             if(key == 'q') break;
+
+// #ifdef UNIFIED_MEM
+//         cudaStreamAttachMemAsync(stream,blob,0,cudaMemAttachHost);
+//         cudaStreamAttachMemAsync(stream,prob1,0,cudaMemAttachGlobal);
+//         cudaStreamAttachMemAsync(stream,prob2,0,cudaMemAttachGlobal);
+//         cudaStreamAttachMemAsync(stream,prob3,0,cudaMemAttachGlobal);
+// #endif
+
     }
 
     cudaStreamDestroy(stream);
@@ -763,14 +837,9 @@ int main(int argc, char** argv) {
     CHECK(cudaFree(buffers[outputIndex2]));
     CHECK(cudaFree(buffers[outputIndex3]));
 
-    cudaFreeHost(blob);
-
-    cudaFreeHost(prob1);
-    cudaFreeHost(prob2);
-    cudaFreeHost(prob3);
 
     // delete the pointer to the float
-    // delete blob;
+    // delete[] blob;
     // destroy the engine
     // delete context;
     // delete engine;
