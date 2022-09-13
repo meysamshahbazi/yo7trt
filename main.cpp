@@ -797,13 +797,14 @@ auto output_size3 = getSizeByDim(out_dims3);
         // context.enqueue(1, buffers, stream, nullptr);
         // void* const* bindings, cudaStream_t stream, cudaEvent_t* inputConsumed)
         context->enqueueV2(buffers, stream, nullptr);
-#ifdef CLASSIC_MEM        
+#ifdef CLASSIC_MEM       
         CHECK(cudaMemcpyAsync(prob1, buffers[outputIndex1], output_size1 * sizeof(float), cudaMemcpyDeviceToHost, stream));
         CHECK(cudaMemcpyAsync(prob2, buffers[outputIndex2], output_size2 * sizeof(float), cudaMemcpyDeviceToHost, stream));
         CHECK(cudaMemcpyAsync(prob3, buffers[outputIndex3], output_size3 * sizeof(float), cudaMemcpyDeviceToHost, stream));
 #endif        
         // cout<<"IM here\n";
 #ifdef UNIFIED_MEM
+        cudaStreamSynchronize(stream); // this additional bcuse of Note on page 10 cuda for tegra doc 
         cudaStreamAttachMemAsync(stream,prob1,0,cudaMemAttachHost);
         cudaStreamAttachMemAsync(stream,prob2,0,cudaMemAttachHost);
         cudaStreamAttachMemAsync(stream,prob3,0,cudaMemAttachHost);
