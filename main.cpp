@@ -277,12 +277,6 @@ static void nms_sorted_bboxes(const std::vector<Object>& faceobjects, std::vecto
 
     const int n = faceobjects.size();
 
-    // std::vector<float> areas(n);
-    // for (int i = 0; i < n; i++)
-    // {
-    //     areas[i] = faceobjects[i].rect.area();
-    // }
-
     for (int i = 0; i < n; i++)
     {
         const Object& a = faceobjects[i];
@@ -391,6 +385,7 @@ void blobFromImage(cv::Mat& img,float* blob){
 }
 
 void blobFromImage2(cv::Mat& img,float* blob){
+    // this function optimized for padded image copy!
     int img_h = img.rows;
     int img_w = img.cols;
     int data_idx = 0;
@@ -667,21 +662,9 @@ int main(int argc, char** argv) {
         auto binding_size = getSizeByDim(engine->getBindingDimensions(i)) * 1 * sizeof(float);
         // cudaMalloc(&buffers_base_q[i], binding_size);
         std::cout<<engine->getBindingName(i)<<std::endl;
-        // if (engine->bindingIsInput(i))
-        // {
-            
-        //     input_dims_base_q.emplace_back(engine_base_q->getBindingDimensions(i));
-        // }
-        // else
-        // {
-        //     output_dims_base_q.emplace_back(engine_base_q->getBindingDimensions(i));
-        // }
     }
 
-
     cv::Mat img;
-
-    
 
     // code from doInference()
     assert(engine->getNbBindings() == 4); // it must be 4
@@ -699,13 +682,13 @@ int main(int argc, char** argv) {
 
     // Create GPU buffers on device
 
-auto out_dims1 = engine->getBindingDimensions(1);
-auto out_dims2 = engine->getBindingDimensions(2);
-auto out_dims3 = engine->getBindingDimensions(3);
+    auto out_dims1 = engine->getBindingDimensions(1);
+    auto out_dims2 = engine->getBindingDimensions(2);
+    auto out_dims3 = engine->getBindingDimensions(3);
 
-auto output_size1 = getSizeByDim(out_dims1);
-auto output_size2 = getSizeByDim(out_dims2);
-auto output_size3 = getSizeByDim(out_dims3);
+    auto output_size1 = getSizeByDim(out_dims1);
+    auto output_size2 = getSizeByDim(out_dims2);
+    auto output_size3 = getSizeByDim(out_dims3);
 
 #ifdef CLASSIC_MEM
     float* prob1 = new float[output_size1];
@@ -745,13 +728,10 @@ auto output_size3 = getSizeByDim(out_dims3);
     int img_w = img.cols;
     int img_h = img.rows;
 
-    float r = std::min(INPUT_W / (img.cols*1.0), INPUT_H / (img.rows*1.0));
-    
-    std::cout<<r<<std::endl;
-    int unpad_w = r * img_w;
-    int unpad_h = r * img_h;
+    float scale = std::min(INPUT_W / (img.cols*1.0), INPUT_H / (img.rows*1.0));    
+    int unpad_w = scale * img_w;
+    int unpad_h = scale * img_h;
     cv::Mat re(unpad_h, unpad_w, CV_8UC3);
-    // cv::Mat pr_img(INPUT_H, INPUT_W, CV_8UC3, cv::Scalar(114, 114, 114));
 
     int data_idx = 0;
     for (int i = 0; i < INPUT_H; ++i)
@@ -770,22 +750,16 @@ auto output_size3 = getSizeByDim(out_dims3);
     for(;;)
     {
         cap >> img;
-
         // stop the program if no more images
         if(img.rows==0 || img.cols==0)
             break;
+
         int img_w = img.cols;
         int img_h = img.rows;
-        // pr_img = static_resize(img);
-        // static_resize(img,pr_img);
-        // START of static_resize function -----------------------
-        
         cv::resize(img, re, re.size());
         blobFromImage2(re,blob);
-        float scale = std::min(INPUT_W / (img.cols*1.0), INPUT_H / (img.rows*1.0));
 
         auto start = std::chrono::system_clock::now();
-        // doInference(*context, blob, prob1,output_size1, prob2,output_size2, prob3,output_size3, pr_img.size());
 #ifdef CLASSIC_MEM
         CHECK(cudaMemcpyAsync(buffers[inputIndex], blob, 3 * INPUT_W * INPUT_H * sizeof(float), cudaMemcpyHostToDevice, stream));
 #endif
@@ -821,12 +795,12 @@ auto output_size3 = getSizeByDim(out_dims3);
         int key = cv::waitKey(1); 
             if(key == 'q') break;
 
-// #ifdef UNIFIED_MEM
-//         cudaStreamAttachMemAsync(stream,blob,0,cudaMemAttachHost);
-//         cudaStreamAttachMemAsync(stream,prob1,0,cudaMemAttachGlobal);
-//         cudaStreamAttachMemAsync(stream,prob2,0,cudaMemAttachGlobal);
-//         cudaStreamAttachMemAsync(stream,prob3,0,cudaMemAttachGlobal);
-// #endif
+#ifdef UNIFIED_MEM
+        cudaStreamAttachMemAsync(stream,blob,0,cudaMemAttachHost);
+        cudaStreamAttachMemAsync(stream,prob1,0,cudaMemAttachGlobal);
+        cudaStreamAttachMemAsync(stream,prob2,0,cudaMemAttachGlobal);
+        cudaStreamAttachMemAsync(stream,prob3,0,cudaMemAttachGlobal);
+#endif
 
     }
 
