@@ -1,103 +1,17 @@
-#include <fstream>
-#include <iostream>
-#include <sstream>
-#include <numeric>
-#include <chrono>
-#include <vector>
-#include <opencv2/opencv.hpp>
-#include <opencv2/videoio.hpp>
-
-#include <dirent.h>
-#include "NvInfer.h"
-#include "cuda_runtime_api.h"
-#include "logging.h"
-#include <string>
-
-#include <iostream>
-#include <fstream>
-#include <NvInfer.h>
-#include <memory>
-#include <NvOnnxParser.h>
-#include <vector>
-#include <cuda_runtime_api.h>
-#include <opencv2/imgcodecs.hpp>
-#include <opencv2/core/cuda.hpp>
-#include <opencv2/cudawarping.hpp>
-#include <opencv2/core.hpp>
-#include <opencv2/cudaarithm.hpp>
-#include <algorithm>
-#include <numeric>
-
-#include <iostream>
-#include <fstream>
-#include <string>
-#include <array>
-
-using namespace std;
-
-#include <fstream>
-#include <string>
-#include <algorithm>
-
+#include "utils.hpp"
+#include "yolo7.hpp"
 
 #define CLASSIC_MEM
 // #define UNIFIED_MEM
-
-
-struct  TRTDestroy
-{
-    template<class T>
-    void operator()(T* obj) const 
-    {
-        if (obj)
-            // obj->destroy();
-            delete obj;
-    }
-};
-
-
-
-#define CHECK(status) \
-    do\
-    {\
-        auto ret = (status);\
-        if (ret != 0)\
-        {\
-            std::cerr << "Cuda failure: " << ret << std::endl;\
-            abort();\
-        }\
-    } while (0)
 
 #define DEVICE 0  // GPU id
 #define NMS_THRESH 0.45
 #define BBOX_CONF_THRESH 0.5
 
-using namespace nvinfer1;
 
-// stuff we know about the network and the input/output blobs
-static const int INPUT_W = 640;
-static const int INPUT_H = 384;
-static const int NUM_CLASSES = 80;
-const char* INPUT_BLOB_NAME = "input_0";
-const char* OUTPUT_BLOB_NAME = "o0";
 static Logger gLogger;
 
 // cv::Mat static_resize(cv::Mat& img) 
-cv::Mat static_resize(cv::Mat& img,cv::Mat& out) 
-{
-    float r = std::min(INPUT_W / (img.cols*1.0), INPUT_H / (img.rows*1.0));
-    // r = std::min(r, 1.0f);
-    std::cout<<r<<std::endl;
-    int unpad_w = r * img.cols;
-    int unpad_h = r * img.rows;
-    cv::Mat re(unpad_h, unpad_w, CV_8UC3);
-    cv::resize(img, re, re.size());
-    // cv::Mat out(INPUT_H, INPUT_W, CV_8UC3, cv::Scalar(114, 114, 114));
-    out = cv::Mat(INPUT_H, INPUT_W, CV_8UC3, cv::Scalar(114, 114, 114));
-    re.copyTo(out(cv::Rect(0, 0, re.cols, re.rows)));
-    
-    return out;
-}
 
 struct Object
 {
@@ -106,28 +20,7 @@ struct Object
     float prob;
 };
 
-struct GridAndStride
-{
-    int grid0;
-    int grid1;
-    int stride;
-};
 
-static void generate_grids_and_stride(std::vector<int>& strides, std::vector<GridAndStride>& grid_strides)
-{
-    for (auto stride : strides)
-    {
-        int num_grid_y = INPUT_H / stride;
-        int num_grid_x = INPUT_W / stride;
-        for (int g1 = 0; g1 < num_grid_y; g1++)
-        {
-            for (int g0 = 0; g0 < num_grid_x; g0++)
-            {
-                grid_strides.push_back((GridAndStride){g0, g1, stride});
-            }
-        }
-    }
-}
 
 static inline float intersection_area(const Object& a, const Object& b)
 {
@@ -135,95 +28,7 @@ static inline float intersection_area(const Object& a, const Object& b)
     return inter.area();
 }
 
-void parseOnnxModel(const string & onnx_path,
-                    size_t pool_size,
-                    unique_ptr<nvinfer1::ICudaEngine,TRTDestroy> &engine,
-                    unique_ptr<nvinfer1::IExecutionContext,TRTDestroy> &context)
-{
-    Logger logger;
-    // first we create builder 
-    unique_ptr<nvinfer1::IBuilder,TRTDestroy> builder{nvinfer1::createInferBuilder(logger)};
-    // then define flag that is needed for creating network definitiopn 
-    uint32_t flag = 1U <<static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
-    unique_ptr<nvinfer1::INetworkDefinition,TRTDestroy> network{builder->createNetworkV2(flag)};
-    // then parse network 
-    unique_ptr<nvonnxparser::IParser,TRTDestroy> parser{nvonnxparser::createParser(*network,logger)};
-    // parse from file
-    parser->parseFromFile(onnx_path.c_str(),static_cast<int>(nvinfer1::ILogger::Severity::kINFO));
-    for (int32_t i = 0; i < parser->getNbErrors(); ++i)
-    {
-        std::cout << parser->getError(i)->desc() << std::endl;
-    }
-    // lets create config file for engine 
-    unique_ptr<nvinfer1::IBuilderConfig,TRTDestroy> config{builder->createBuilderConfig()};
 
-    // config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE,pool_size);
-    config->setMaxWorkspaceSize(1U<<30);
-
-    // use fp16 if it is possible 
-
-    if (builder->platformHasFastFp16())
-    {
-        config->setFlag(nvinfer1::BuilderFlag::kFP16);
-    }
-    // setm max bach size as it is very importannt for trt
-    // builder->setMaxBatchSize(1);
-    // create engine and excution context
-    unique_ptr<nvinfer1::IHostMemory,TRTDestroy> serializedModel{builder->buildSerializedNetwork(*network, *config)};
-
-    nvinfer1::IRuntime* runtime = nvinfer1::createInferRuntime(logger);
-
-
-    engine.reset(runtime->deserializeCudaEngine( serializedModel->data(), serializedModel->size()) );
-    context.reset(engine->createExecutionContext());
-    cout<<"im here-----------------------------"<<endl;
-    return;
-}
-
-void saveEngineFile(const string & onnx_path,
-                    const string & engine_path)
-{
-    Logger logger;
-    // first we create builder 
-    unique_ptr<nvinfer1::IBuilder,TRTDestroy> builder{nvinfer1::createInferBuilder(logger)};
-    // then define flag that is needed for creating network definitiopn 
-    uint32_t flag = 1U <<static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
-    unique_ptr<nvinfer1::INetworkDefinition,TRTDestroy> network{builder->createNetworkV2(flag)};
-    // then parse network 
-    unique_ptr<nvonnxparser::IParser,TRTDestroy> parser{nvonnxparser::createParser(*network,logger)};
-    // parse from file
-    parser->parseFromFile(onnx_path.c_str(),static_cast<int>(nvinfer1::ILogger::Severity::kINFO));
-    for (int32_t i = 0; i < parser->getNbErrors(); ++i)
-    {
-        std::cout << parser->getError(i)->desc() << std::endl;
-    }
-    // lets create config file for engine 
-    unique_ptr<nvinfer1::IBuilderConfig,TRTDestroy> config{builder->createBuilderConfig()};
-
-    // config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE,1U<<24);
-    config->setMaxWorkspaceSize(1U<<26);
-
-    // use fp16 if it is possible 
-
-    if (builder->platformHasFastFp16())
-    {
-        config->setFlag(nvinfer1::BuilderFlag::kFP16);
-    }
-    // setm max bach size as it is very importannt for trt
-    // builder->setMaxBatchSize(1);
-    // create engine and excution context
-    unique_ptr<nvinfer1::IHostMemory,TRTDestroy> serializedModel{builder->buildSerializedNetwork(*network, *config)};
-
-    std::ofstream p(engine_path, std::ios::binary);
-    if (!p)
-    {
-        std::cerr << "could not open plan output file" << std::endl;
-        return;
-    }
-
-    p.write(reinterpret_cast<const char*>(serializedModel->data()), serializedModel->size());
-    return;
-}
 
 
 static void qsort_descent_inplace(std::vector<Object>& faceobjects, int left, int right)
