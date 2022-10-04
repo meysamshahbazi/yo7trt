@@ -249,4 +249,41 @@ void draw_objects(const cv::Mat& bgr, const std::vector<Object>& objects, std::s
     
 }
 
+void blobFromImage(cv::Mat& img,float* blob){
+    int img_h = img.rows;
+    int img_w = img.cols;
+    int data_idx = 0;
+    for (int i = 0; i < img_h; ++i)
+    {
+        uchar* pixel = img.ptr<uchar>(i);  // point to first color in row
+        for (int j = 0; j < img_w; ++j)
+        {
+            blob[data_idx] = (*pixel++)/255.f;
+            blob[data_idx+img_h*img_w] = (*pixel++)/255.f;
+            blob[data_idx+2*img_h*img_w] = (*pixel++)/255.f;
+            data_idx++;
+        }
+    }
+}
+
+void blobFromImage2(cv::Mat& img,float* blob)
+{
+    // this function optimized for padded image copy!
+    int img_h = img.rows;
+    int img_w = img.cols;
+    int data_idx = 0;
+    for (int i = 0; i < img_h; ++i)
+    {
+        uchar* pixel = img.ptr<uchar>(i);  // point to first color in row
+        for (int j = 0; j < img_w; ++j)
+        {
+            data_idx = i*img_w+j;
+            blob[data_idx] = (*pixel++)/255.f;
+            blob[data_idx+INPUT_H*INPUT_W] = (*pixel++)/255.f;
+            blob[data_idx+2*INPUT_H*INPUT_W] = (*pixel++)/255.f;
+            // data_idx++;
+        }
+    }
+}
+
 

@@ -104,7 +104,8 @@ void qsort_descent_inplace(std::vector<Object>& objects);
 void qsort_descent_inplace(std::vector<Object>& faceobjects, int left, int right);
 void draw_objects(const cv::Mat& bgr, const std::vector<Object>& objects, std::string f);
 size_t getSizeByDim(const nvinfer1::Dims& dims);
-
+void blobFromImage(cv::Mat& img,float* blob);
+void blobFromImage2(cv::Mat& img,float* blob);
 
 const float color_list[80][3] =
 {

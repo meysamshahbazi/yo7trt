@@ -2,6 +2,10 @@
 #define __YOLO7_HPP__ 
 #include "utils.hpp"
 
+
+#define NMS_THRESH 0.45
+#define BBOX_CONF_THRESH 0.5
+
 class Yolo7
 {
 private:
@@ -17,9 +21,12 @@ private:
     cudaStream_t stream;
     int img_w;
     int img_h;
-    
+    cv::Mat re;
+    float scale;
+    size_t output_size1,output_size2,output_size3;
+
 public:
-    Yolo7(std::string engine_file_path);
+    Yolo7(std::string engine_file_path, int img_w, int img_h);
     ~Yolo7();
     void detect(const cv::Mat &img,std::vector<Object> &objects);
 

@@ -8,7 +8,7 @@
 #define NMS_THRESH 0.45
 #define BBOX_CONF_THRESH 0.5
 
-
+/*
 static Logger gLogger;
 
 void generete_proposal_scale(float* feat_blob, float prob_threshold, std::vector<Object>& objects,int nx, int ny,float stride,float * anchor_grid_w,float * anchor_grid_h)
@@ -71,6 +71,7 @@ static void generate_yolo7_proposals(float* feat_blob1,float* feat_blob2,float* 
 }
 
 // float* blobFromImage(cv::Mat& img){
+
 void blobFromImage(cv::Mat& img,float* blob){
     int img_h = img.rows;
     int img_w = img.cols;
@@ -106,6 +107,7 @@ void blobFromImage2(cv::Mat& img,float* blob){
         }
     }
 }
+
 
 static void decode_outputs(float* prob1,float* prob2,float* prob3, std::vector<Object>& objects, float scale, const int img_w, const int img_h) {
         std::vector<Object> proposals;
@@ -149,7 +151,43 @@ static void decode_outputs(float* prob1,float* prob2,float* prob3, std::vector<O
             objects[i].rect.height = y1 - y0;
         }
 }
+*/
+int main(int argc, char** argv) 
+{
+    const std::string input_image_path {argv[3]};
+    cv::VideoCapture cap(input_image_path);
+    cv::Mat img;
+    cap >> img;
 
+    // stop the program if no more images
+    if(img.rows==0 || img.cols==0)
+        return -1;
+    int img_w = img.cols;
+    int img_h = img.rows;
+    Yolo7 yolo7(argv[1],img_w,img_h);
+
+    
+    for(;;)
+    {
+        cap >> img;
+        // stop the program if no more images
+        if(img.rows==0 || img.cols==0)
+            break;
+        
+        std::vector<Object> objects;
+        yolo7.detect(img,objects);
+        
+        draw_objects(img, objects, input_image_path);
+        
+        int key = cv::waitKey(1); 
+            if(key == 'q') break;
+
+    }
+    return 0;
+}
+
+
+/*
 int main(int argc, char** argv) {
     cudaSetDevice(DEVICE);
     // create a model using the API directly and serialize it to a stream
@@ -299,6 +337,7 @@ int main(int argc, char** argv) {
 
         int img_w = img.cols;
         int img_h = img.rows;
+        cout<<img_w<<" "<<img_h<<endl;
         cv::resize(img, re, re.size());
         blobFromImage2(re,blob);
 
@@ -364,3 +403,5 @@ int main(int argc, char** argv) {
     // delete runtime;
     return 0;
 }
+
+*/
