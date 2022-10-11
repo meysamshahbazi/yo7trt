@@ -11,7 +11,8 @@ class Yolo7
 private:
     Logger gLogger;
     unique_ptr<nvinfer1::IExecutionContext,TRTDestroy> context;
-    void* buffers[4];
+    unique_ptr<nvinfer1::ICudaEngine,TRTDestroy> engine;
+    std::vector<void*> buffers;
     const int inputIndex = 0;
     const int outputIndex1 = 1;
     const int outputIndex2 = 2;

@@ -166,7 +166,7 @@ int main(int argc, char** argv)
     int img_h = img.rows;
     Yolo7 yolo7(argv[1],img_w,img_h);
 
-    
+    // cout<<"im here"
     for(;;)
     {
         cap >> img;

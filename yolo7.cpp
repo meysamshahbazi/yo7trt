@@ -24,13 +24,14 @@ Yolo7::Yolo7(std::string engine_file_path,int img_w ,int img_h)
     }
     unique_ptr<IRuntime,TRTDestroy> runtime{createInferRuntime(gLogger)};
     assert(runtime != nullptr);
-    unique_ptr<nvinfer1::ICudaEngine,TRTDestroy> engine{runtime->deserializeCudaEngine(trtModelStream, size)};
+    // unique_ptr<nvinfer1::ICudaEngine,TRTDestroy> engine{runtime->deserializeCudaEngine(trtModelStream, size)};
+    engine.reset(runtime->deserializeCudaEngine(trtModelStream, size));
     assert(engine != nullptr); 
     context.reset( engine->createExecutionContext() );
     assert(context != nullptr);
     
     delete[] trtModelStream;
-    
+    buffers.reserve(engine->getNbBindings());
     cout<<"------------------------------"<<endl;
     for (size_t i = 0; i < engine->getNbBindings(); ++i)
     {
@@ -47,6 +48,7 @@ Yolo7::Yolo7(std::string engine_file_path,int img_w ,int img_h)
     output_size1 = getSizeByDim(out_dims1);
     output_size2 = getSizeByDim(out_dims2);
     output_size3 = getSizeByDim(out_dims3);
+    cout<<output_size1<<" | "<<output_size2<<" | "<<output_size3<<"\n";
 
 #ifdef CLASSIC_MEM_
     prob1 = new float[output_size1];
@@ -73,7 +75,7 @@ Yolo7::Yolo7(std::string engine_file_path,int img_w ,int img_h)
 #endif
     
     CHECK(cudaStreamCreate(&stream));
-    scale = std::min(INPUT_W / (img_h*1.0), INPUT_H / (img_w*1.0));    
+    scale = std::min(INPUT_W / (img_w*1.0), INPUT_H / (img_h*1.0));    
     int unpad_w = scale * img_w;
     int unpad_h = scale * img_h;
     re = cv::Mat(unpad_h, unpad_w, CV_8UC3);
@@ -199,23 +201,20 @@ void Yolo7::detect(const cv::Mat &img,std::vector<Object> &objects)
 {
     int img_w = img.cols;
     int img_h = img.rows;
-    cout<<re.size()<<endl;
     cv::resize(img, re, re.size());
-    cv::imshow("re",re);cv::waitKey(0);
     blobFromImage2(re,blob);
 
-    // std::cout<<buffers[0]<<endl;
 #ifdef CLASSIC_MEM_
         CHECK(cudaMemcpyAsync(buffers[inputIndex], blob, 3 * INPUT_W * INPUT_H * sizeof(float), cudaMemcpyHostToDevice, stream));
-        CHECK(cudaMemcpy(buffers[inputIndex], blob, 3 * INPUT_W * INPUT_H * sizeof(float), cudaMemcpyHostToDevice));
+        // CHECK(cudaMemcpy(buffers[inputIndex], blob, 3 * INPUT_W * INPUT_H * sizeof(float), cudaMemcpyHostToDevice));
 #endif
 
 #ifdef UNIFIED_MEM_
         cudaStreamAttachMemAsync(stream,blob,0,cudaMemAttachGlobal);
 #endif
     
-    context->enqueueV2(buffers, stream, nullptr);
-    // context->executeV2(buffers);
+    context->enqueueV2(buffers.data(), stream, nullptr);
+
 #ifdef CLASSIC_MEM_       
         CHECK(cudaMemcpyAsync(prob1, buffers[outputIndex1], output_size1 * sizeof(float), cudaMemcpyDeviceToHost, stream));
         CHECK(cudaMemcpyAsync(prob2, buffers[outputIndex2], output_size2 * sizeof(float), cudaMemcpyDeviceToHost, stream));
@@ -228,8 +227,8 @@ void Yolo7::detect(const cv::Mat &img,std::vector<Object> &objects)
         cudaStreamAttachMemAsync(stream,prob2,0,cudaMemAttachHost);
         cudaStreamAttachMemAsync(stream,prob3,0,cudaMemAttachHost);
 #endif
-    cudaStreamSynchronize(stream);
 
+    cudaStreamSynchronize(stream);
     decode_outputs(prob1,prob2,prob3, objects, scale, img_w, img_h);
 
 #ifdef UNIFIED_MEM_
