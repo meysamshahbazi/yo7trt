@@ -35,5 +35,7 @@ make
 
 - [ ] Clean code and modularization!
 
+- [ ] make anchor computtaion in cuda or trt!
+
 - [ ] use  `getBindingIndex()` for general coding
 

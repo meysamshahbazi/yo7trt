@@ -1,12 +1,9 @@
 #include "yolo7.hpp"
 
-#define CLASSIC_MEM_
-// #define UNIFIED_MEM_
-
-
-
 Yolo7::Yolo7(std::string engine_file_path,int img_w ,int img_h)
 {
+
+
     // TODO: check for existance of engine file or crete engine...
     char *trtModelStream{nullptr};
     size_t size{0};
@@ -24,7 +21,6 @@ Yolo7::Yolo7(std::string engine_file_path,int img_w ,int img_h)
     }
     unique_ptr<IRuntime,TRTDestroy> runtime{createInferRuntime(gLogger)};
     assert(runtime != nullptr);
-    // unique_ptr<nvinfer1::ICudaEngine,TRTDestroy> engine{runtime->deserializeCudaEngine(trtModelStream, size)};
     engine.reset(runtime->deserializeCudaEngine(trtModelStream, size));
     assert(engine != nullptr); 
     context.reset( engine->createExecutionContext() );
@@ -92,10 +88,57 @@ Yolo7::Yolo7(std::string engine_file_path,int img_w ,int img_h)
             data_idx++;
         }
     }
+    // warm-up
+    for (int i=0; i<20;i++)
+        context->executeV2(buffers.data());
+
 
 }
-void generete_proposal_scale(float* feat_blob, float prob_threshold, std::vector<Object>& objects,int nx, int ny,float stride,float * anchor_grid_w,float * anchor_grid_h)
+void Yolo7::detect(const cv::Mat &img,std::vector<Object> &objects)
 {
+    int img_w = img.cols;
+    int img_h = img.rows;
+    cv::resize(img, re, re.size());
+    blobFromImage2(re,blob);
+
+#ifdef CLASSIC_MEM_
+        CHECK(cudaMemcpyAsync(buffers[inputIndex], blob, 3 * INPUT_W * INPUT_H * sizeof(float), cudaMemcpyHostToDevice, stream));
+#endif
+
+#ifdef UNIFIED_MEM_
+        cudaStreamAttachMemAsync(stream,blob,0,cudaMemAttachGlobal);
+#endif
+    
+    context->enqueueV2(buffers.data(), stream, nullptr);
+
+#ifdef CLASSIC_MEM_       
+        CHECK(cudaMemcpyAsync(prob1, buffers[outputIndex1], output_size1 * sizeof(float), cudaMemcpyDeviceToHost, stream));
+        CHECK(cudaMemcpyAsync(prob2, buffers[outputIndex2], output_size2 * sizeof(float), cudaMemcpyDeviceToHost, stream));
+        CHECK(cudaMemcpyAsync(prob3, buffers[outputIndex3], output_size3 * sizeof(float), cudaMemcpyDeviceToHost, stream));
+#endif        
+        
+#ifdef UNIFIED_MEM_
+        cudaStreamSynchronize(stream); // this additional bcuse of Note on page 10 cuda for tegra doc 
+        cudaStreamAttachMemAsync(stream,prob1,0,cudaMemAttachHost);
+        cudaStreamAttachMemAsync(stream,prob2,0,cudaMemAttachHost);
+        cudaStreamAttachMemAsync(stream,prob3,0,cudaMemAttachHost);
+#endif
+
+    cudaStreamSynchronize(stream);
+    decode_outputs(prob1,prob2,prob3, objects, scale, img_w, img_h);
+
+#ifdef UNIFIED_MEM_
+        cudaStreamAttachMemAsync(stream,blob,0,cudaMemAttachHost);
+        cudaStreamAttachMemAsync(stream,prob1,0,cudaMemAttachGlobal);
+        cudaStreamAttachMemAsync(stream,prob2,0,cudaMemAttachGlobal);
+        cudaStreamAttachMemAsync(stream,prob3,0,cudaMemAttachGlobal);
+#endif
+
+}
+
+void Yolo7::generete_proposal_scale(float* feat_blob, float prob_threshold, std::vector<Object>& objects,int nx, int ny,float stride,float * anchor_grid_w,float * anchor_grid_h)
+{
+    
     for(int i1=0;i1<3;i1++)
     for(int i2=0;i2<ny;i2++) // nx = 80 stride = 8 
     for(int i3=0;i3<nx;i3++) // ny = 48
@@ -136,53 +179,26 @@ void generete_proposal_scale(float* feat_blob, float prob_threshold, std::vector
         }
     }
 }
-static void generate_yolo7_proposals(float* feat_blob1,float* feat_blob2,float* feat_blob3, float prob_threshold, std::vector<Object>& objects)
-{
-    float anchor_grid_w_1[] = {12.0,19.0,40.0};
-    float anchor_grid_h_1[] = {16.0,36.0,28.0};
 
-    float anchor_grid_w_2[] = {36,76,72};
-    float anchor_grid_h_2[] = {75,55,146};
 
-    float anchor_grid_w_3[] = {142,192,459};
-    float anchor_grid_h_3[] = {110,243,401};
-
-    generete_proposal_scale(feat_blob1,prob_threshold,objects,80,48,8,anchor_grid_w_1,anchor_grid_h_1);
-    generete_proposal_scale(feat_blob2,prob_threshold,objects,40,24,16,anchor_grid_w_2,anchor_grid_h_2);
-    generete_proposal_scale(feat_blob3,prob_threshold,objects,20,12,32,anchor_grid_w_3,anchor_grid_h_3);
-
-}
-
-void decode_outputs(float* prob1,float* prob2,float* prob3, std::vector<Object>& objects, float scale, const int img_w, const int img_h) {
+void Yolo7::decode_outputs(float* prob1,float* prob2,float* prob3, std::vector<Object>& objects, float scale, const int img_w, const int img_h) {
         std::vector<Object> proposals;
-        // std::vector<int> strides = {8, 16, 32};
-        // std::vector<GridAndStride> grid_strides;
-        // generate_grids_and_stride(strides, grid_strides);
 
-
-        // generate_yolox_proposals(grid_strides, prob1,  BBOX_CONF_THRESH, proposals);
-        generate_yolo7_proposals(prob1, prob2, prob3,  BBOX_CONF_THRESH, proposals);
-
-        // qsort_descent_inplace(proposals);
-
+        generete_proposal_scale(prob1,BBOX_CONF_THRESH,proposals,80,48,8,anchor_grid_w_1,anchor_grid_h_1);
+        generete_proposal_scale(prob2,BBOX_CONF_THRESH,proposals,40,24,16,anchor_grid_w_2,anchor_grid_h_2);
+        generete_proposal_scale(prob3,BBOX_CONF_THRESH,proposals,20,12,32,anchor_grid_w_3,anchor_grid_h_3);
         std::vector<int> picked;
         nms_sorted_bboxes(proposals, picked, NMS_THRESH);
-
-
         int count = picked.size();
-
-
         objects.resize(count);
         for (int i = 0; i < count; i++)
         {
             objects[i] = proposals[picked[i]];
-
             // adjust offset to original unpadded
             float x0 = (objects[i].rect.x) / scale;
             float y0 = (objects[i].rect.y) / scale;
             float x1 = (objects[i].rect.x + objects[i].rect.width) / scale;
             float y1 = (objects[i].rect.y + objects[i].rect.height) / scale;
-
             // clip
             x0 = std::max(std::min(x0, (float)(img_w - 1)), 0.f);
             y0 = std::max(std::min(y0, (float)(img_h - 1)), 0.f);
@@ -196,59 +212,18 @@ void decode_outputs(float* prob1,float* prob2,float* prob3, std::vector<Object>&
         }
 }
 
-
-void Yolo7::detect(const cv::Mat &img,std::vector<Object> &objects)
-{
-    int img_w = img.cols;
-    int img_h = img.rows;
-    cv::resize(img, re, re.size());
-    blobFromImage2(re,blob);
-
-#ifdef CLASSIC_MEM_
-        CHECK(cudaMemcpyAsync(buffers[inputIndex], blob, 3 * INPUT_W * INPUT_H * sizeof(float), cudaMemcpyHostToDevice, stream));
-        // CHECK(cudaMemcpy(buffers[inputIndex], blob, 3 * INPUT_W * INPUT_H * sizeof(float), cudaMemcpyHostToDevice));
-#endif
-
-#ifdef UNIFIED_MEM_
-        cudaStreamAttachMemAsync(stream,blob,0,cudaMemAttachGlobal);
-#endif
-    
-    context->enqueueV2(buffers.data(), stream, nullptr);
-
-#ifdef CLASSIC_MEM_       
-        CHECK(cudaMemcpyAsync(prob1, buffers[outputIndex1], output_size1 * sizeof(float), cudaMemcpyDeviceToHost, stream));
-        CHECK(cudaMemcpyAsync(prob2, buffers[outputIndex2], output_size2 * sizeof(float), cudaMemcpyDeviceToHost, stream));
-        CHECK(cudaMemcpyAsync(prob3, buffers[outputIndex3], output_size3 * sizeof(float), cudaMemcpyDeviceToHost, stream));
-#endif        
-        
-#ifdef UNIFIED_MEM_
-        cudaStreamSynchronize(stream); // this additional bcuse of Note on page 10 cuda for tegra doc 
-        cudaStreamAttachMemAsync(stream,prob1,0,cudaMemAttachHost);
-        cudaStreamAttachMemAsync(stream,prob2,0,cudaMemAttachHost);
-        cudaStreamAttachMemAsync(stream,prob3,0,cudaMemAttachHost);
-#endif
-
-    cudaStreamSynchronize(stream);
-    decode_outputs(prob1,prob2,prob3, objects, scale, img_w, img_h);
-
-#ifdef UNIFIED_MEM_
-        cudaStreamAttachMemAsync(stream,blob,0,cudaMemAttachHost);
-        cudaStreamAttachMemAsync(stream,prob1,0,cudaMemAttachGlobal);
-        cudaStreamAttachMemAsync(stream,prob2,0,cudaMemAttachGlobal);
-        cudaStreamAttachMemAsync(stream,prob3,0,cudaMemAttachGlobal);
-#endif
-
-}
-
 Yolo7::~Yolo7()
 {
-    cudaStreamDestroy(stream);
-    
     CHECK(cudaFree(buffers[inputIndex]));
 
     CHECK(cudaFree(buffers[outputIndex1]));
     CHECK(cudaFree(buffers[outputIndex2]));
     CHECK(cudaFree(buffers[outputIndex3]));
+    cudaStreamDestroy(stream);
+    delete[] blob;
+    delete[] prob1;
+    delete[] prob2;
+    delete[] prob3;
 }
 
 
